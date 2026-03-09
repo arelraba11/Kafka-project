@@ -1,9 +1,13 @@
-Analyze the Kafka project.
+Analyze the Kafka repository.
 
 Tasks:
 
-- Identify producers
-- Identify consumers
-- Identify streams processors
-- Identify topics
-- Explain the data pipeline
+Identify all producers
+
+Identify all consumers
+
+Identify Kafka Streams processors
+
+List Kafka topics
+
+Explain the end-to-end data pipeline.

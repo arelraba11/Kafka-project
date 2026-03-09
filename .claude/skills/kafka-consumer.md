@@ -1,31 +1,34 @@
-# Kafka Consumer Skill
+# Kafka Consumer Pattern
 
-Consumers should:
+Kafka consumers should:
 
-- subscribe to topics
-- poll in a loop
-- process records
-- commit offsets
+subscribe to topics
 
-Typical pattern:
+poll records in a loop
+
+process each record
+
+commit offsets if needed
+
+Example pattern:
 
 KafkaConsumer<String, String> consumer =
-    new KafkaConsumer<>(properties);
+new KafkaConsumer<>(properties);
 
 consumer.subscribe(List.of("topic"));
 
 while (true) {
 
-  ConsumerRecords<String, String> records =
-      consumer.poll(Duration.ofMillis(100));
+ConsumerRecords<String, String> records =
+consumer.poll(Duration.ofMillis(100));
 
-  for (ConsumerRecord<String, String> record : records) {
+for (ConsumerRecord<String, String> record : records) {
 
-    log.info("Key: {}", record.key());
-    log.info("Value: {}", record.value());
-    log.info("Partition: {}", record.partition());
-    log.info("Offset: {}", record.offset());
+log.info("Key {}", record.key());
+log.info("Value {}", record.value());
+log.info("Partition {}", record.partition());
+log.info("Offset {}", record.offset());
 
-  }
+}
 
 }

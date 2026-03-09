@@ -1,9 +1,9 @@
-# Coding Conventions
+# Coding Style
 
 Language: Java
 
 Logging:
-Use SLF4J.
+Use SLF4J logging.
 
 Kafka:
 
@@ -11,9 +11,11 @@ Use org.apache.kafka.clients library.
 
 Serialization:
 
-Use StringSerializer and StringDeserializer unless required otherwise.
+Default serializers:
+StringSerializer
+StringDeserializer
 
-Always log Kafka metadata:
+Kafka logs should include:
 
 topic
 partition

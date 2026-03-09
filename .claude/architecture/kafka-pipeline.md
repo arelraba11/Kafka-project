@@ -1,8 +1,8 @@
 # Kafka Pipeline Architecture
 
-This repository implements a Kafka-based data pipeline.
+This project implements a Kafka-based data engineering pipeline.
 
-Data flow:
+Data Flow:
 
 Wikimedia SSE API
 → WikimediaChangesProducer
@@ -15,16 +15,16 @@ Wikimedia SSE API
 Modules:
 
 kafka-basics
-Basic producer and consumer examples.
+Contains examples of Kafka producers and consumers.
 
 kafka-producer-wikimedia
-Streams events from Wikimedia Recent Changes API into Kafka.
+Streams live events from Wikimedia Recent Changes API.
 
 kafka-streams-wikimedia
-Kafka Streams application performing aggregations.
+Kafka Streams application performing analytics.
 
 kafka-consumer-opensearch
-Consumes events and indexes them into OpenSearch.
+Consumes events from Kafka and indexes them into OpenSearch.
 
 Goal:
-Extend this pipeline with additional data engineering exercises.
+Extend this architecture with additional data engineering exercises.

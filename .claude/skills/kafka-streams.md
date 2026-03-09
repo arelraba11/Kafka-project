@@ -1,19 +1,19 @@
-# Kafka Streams Skill
+# Kafka Streams Pattern
 
-Kafka Streams processors should follow this pattern:
+Kafka Streams processing follows this pattern:
 
 StreamsBuilder builder = new StreamsBuilder();
 
 KStream<String, String> stream =
-    builder.stream("wikimedia.recentchange");
+builder.stream("wikimedia.recentchange");
 
 stream
-  .groupByKey()
-  .count()
-  .toStream()
-  .to("output-topic");
+.groupByKey()
+.count()
+.toStream()
+.to("output-topic");
 
 KafkaStreams streams =
-    new KafkaStreams(builder.build(), properties);
+new KafkaStreams(builder.build(), properties);
 
 streams.start();
