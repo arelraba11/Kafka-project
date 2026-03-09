@@ -1,0 +1,16 @@
+{
+  "name": "exercise4",
+  "version": "1.0.0",
+  "description": "Production-grade customer support analysis pipeline with Kafka fan-out and aggregation",
+  "scripts": {
+    "producer": "bun run producer.ts",
+    "sanitizer": "bun run sanitizer.ts",
+    "aggregator": "bun run insight-aggregator.ts"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

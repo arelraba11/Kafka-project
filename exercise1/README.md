@@ -1,17 +1,17 @@
-# Exercise 1 — Distributed Router & Memory Bot
+# Exercise 1 — Microservices Chat System
 
 ## Overview
 
-Exercise 1 implements a distributed chatbot in which every component is a separate Kafka microservice. No service calls another service directly — all communication happens exclusively through Kafka topics.
+Exercise 1 implements a distributed chatbot where every component is a separate Kafka microservice. No service calls another directly — all communication happens exclusively through Kafka topics.
 
-The system supports four types of user requests:
+The system handles four types of user requests:
 
 - **Weather queries** — mock weather data for major cities
 - **Currency exchange** — static exchange rates between common currencies
 - **Math calculations** — safe arithmetic expression evaluator
-- **General chat** — rule-based conversation with fallback responses
+- **General chat** — rule-based responses with conversation history
 
-Conversation history is persisted to disk (`history.json`) and shared across services via a dedicated Kafka topic. The `/reset` command clears a user's history.
+Conversation history is persisted to disk (`services/memoryService/history.json`) and shared across services via a dedicated Kafka topic. The `/reset` command clears a user's history.
 
 ---
 
@@ -23,7 +23,7 @@ Conversation history is persisted to disk (`history.json`) and shared across ser
          ▼
    UserInterface
          │
-  user-input-events ◀── also: user-control-events (/reset)
+  user-input-events
          │
          ├──────────────────────────┐
          ▼                          ▼
@@ -31,46 +31,38 @@ Conversation history is persisted to disk (`history.json`) and shared across ser
   (persists history)          (classifies intent)
          │                          │
   conversation-history-update       │
-         │                ┌─────────┼──────────┬────────────┐
-         └──▶ RouterService         ▼           ▼            ▼            ▼
+         │                ┌─────────┼────────────┬────────────────┐
+         └──▶ RouterService         ▼             ▼                ▼                ▼
                           intent-math  intent-weather  intent-exchange  intent-general-chat
-                               │           │                │                 │
-                            MathApp    WeatherApp      ExchangeApp     GeneralChatApp
-                               │           │                │                 │
-                               └───────────┴────────────────┴─────────────────┘
-                                                    │
-                                               app-results
-                                                    │
-                                          ResponseAggregator
-                                                    │
-                                             bot-responses
-                                                    │
-                                           UserInterface (prints reply)
+                               │             │                │                  │
+                            MathApp    WeatherApp      ExchangeApp       GeneralChatApp
+                               │             │                │                  │
+                               └─────────────┴────────────────┴──────────────────┘
+                                                      │
+                                                 app-results
+                                                      │
+                                            ResponseAggregator
+                                                      │
+                                               bot-responses
+                                                      │
+                                            UserInterface (stdout)
 ```
 
 ---
 
-## Services
+## Components
 
 ### UserInterface
 **File:** `services/userInterface/userInterface.ts`
 
-Reads user input from stdin. Publishes a `UserInputEvent` to `user-input-events` for every message, and a `UserControlEvent` to `user-control-events` when the user types `/reset`. Subscribes to `bot-responses` and prints the bot reply to stdout.
-
-The active user ID is set via the `USER_ID` environment variable (defaults to `user-1`).
+Reads user input from stdin. Publishes a `UserInputEvent` to `user-input-events` for every message, and a `UserControlEvent` to `user-control-events` when the user types `/reset`. Subscribes to `bot-responses` and prints the bot reply to stdout. The active user ID is set via the `USER_ID` environment variable (default: `user-1`).
 
 ---
 
 ### MemoryService
 **File:** `services/memoryService/memoryService.ts`
 
-Maintains conversation history for all users. Persists history to `services/memoryService/history.json` using the Bun File API. Listens on three topics simultaneously:
-
-- `user-input-events` → appends user message to history
-- `app-results` → appends successful bot responses to history
-- `user-control-events` → deletes history on `/reset`
-
-After every change, publishes a `ConversationHistoryUpdateEvent` to `conversation-history-update` so the RouterService can keep its local cache current.
+Maintains conversation history for all users. Persists history to `services/memoryService/history.json`. Listens on three topics simultaneously — `user-input-events`, `app-results`, and `user-control-events` — and publishes a `ConversationHistoryUpdateEvent` after every change so RouterService keeps its local cache current.
 
 ---
 
@@ -86,8 +78,6 @@ Classifies user intent using regex rules applied in priority order:
 | 3 | Currency exchange | Currency codes: USD, EUR, ILS, GBP, JPY, CHF, CAD, AUD |
 | 4 | General chat | Default fallback |
 
-Maintains a local `historyCache` updated by `conversation-history-update` events, which is passed to the GeneralChatApp as conversation context.
-
 ---
 
 ### MathApp
@@ -95,14 +85,12 @@ Maintains a local `historyCache` updated by `conversation-history-update` events
 
 Evaluates arithmetic expressions using a safe recursive descent parser. Accepts only digits and the operators `+ - * / ( )`. No `eval()` is used. Supports operator precedence and parentheses.
 
-Publishes an `AppResultEvent` with `success: true` and the numeric result, or `success: false` with an error message on invalid input.
-
 ---
 
 ### WeatherApp
 **File:** `services/weatherApp/weatherApp.ts`
 
-Returns mock weather data for a fixed set of cities. Supported cities include Tel Aviv, Jerusalem, Haifa, Eilat, New York, London, Paris, Berlin, Tokyo, and Dubai. Returns a default `20°C, clear` for any unrecognised city.
+Returns mock weather data for a fixed set of cities including Tel Aviv, Jerusalem, London, Paris, Berlin, Tokyo, and others. Returns a default response for unrecognised cities.
 
 ---
 
@@ -116,54 +104,40 @@ Returns exchange rates using a static table anchored to ILS. Supported currencie
 ### GeneralChatApp
 **File:** `services/generalChatApp/generalChatApp.ts`
 
-Produces rule-based responses matched by keyword regex. Covers greetings, Kafka questions, AI topics, jokes, and general conversation. Falls back to one of five rotating responses using conversation history length as a seed.
+Produces rule-based responses matched by keyword regex. Covers greetings, Kafka questions, AI topics, and general conversation. Falls back to rotating responses seeded by conversation history length.
 
 ---
 
 ### ResponseAggregator
 **File:** `services/responseAggregator/responseAggregator.ts`
 
-Consumes every `AppResultEvent` from `app-results` and formats a final message. On `success: false`, formats a user-facing error string. Publishes the result as a `BotResponseEvent` to `bot-responses`.
+Consumes every `AppResultEvent` from `app-results`, formats a final message, and publishes a `BotResponseEvent` to `bot-responses` for the UserInterface to display.
 
 ---
 
-## Kafka Topics
+## Topics
 
-| Topic | Constant | Producer | Consumers |
+| Topic | Producer | Consumer(s) | Description |
 |---|---|---|---|
-| `user-input-events` | `USER_INPUT` | UserInterface | MemoryService, RouterService |
-| `user-control-events` | `USER_CONTROL` | UserInterface | MemoryService |
-| `intent-math` | `INTENT_MATH` | RouterService | MathApp |
-| `intent-weather` | `INTENT_WEATHER` | RouterService | WeatherApp |
-| `intent-exchange` | `INTENT_EXCHANGE` | RouterService | ExchangeApp |
-| `intent-general-chat` | `INTENT_CHAT` | RouterService | GeneralChatApp |
-| `app-results` | `APP_RESULTS` | All apps | ResponseAggregator, MemoryService |
-| `bot-responses` | `BOT_RESPONSES` | ResponseAggregator | UserInterface |
-| `conversation-history-update` | `HISTORY_UPDATE` | MemoryService | RouterService |
+| `user-input-events` | UserInterface | MemoryService, RouterService | Inbound user messages |
+| `user-control-events` | UserInterface | MemoryService | Control commands (`/reset`) |
+| `intent-math` | RouterService | MathApp | Math evaluation requests |
+| `intent-weather` | RouterService | WeatherApp | Weather query requests |
+| `intent-exchange` | RouterService | ExchangeApp | Currency exchange requests |
+| `intent-general-chat` | RouterService | GeneralChatApp | General chat requests |
+| `app-results` | All apps | ResponseAggregator, MemoryService | Completed app responses |
+| `bot-responses` | ResponseAggregator | UserInterface | Final formatted reply |
+| `conversation-history-update` | MemoryService | RouterService | History sync events |
 
-All messages use `userId` as the Kafka message key to preserve per-user ordering within each partition.
-
----
-
-## Event Flow
-
-```
-1. User types "weather in London"
-2. UserInterface → user-input-events
-3. MemoryService consumes event → saves to history.json → publishes conversation-history-update
-4. RouterService consumes event → classifies as "weather" → publishes to intent-weather
-5. WeatherApp consumes event → returns "Weather in London is 12°C and rainy." → publishes to app-results
-6. ResponseAggregator consumes app-results → publishes to bot-responses
-7. UserInterface consumes bot-responses → prints reply
-```
+All messages use `userId` as the Kafka key to preserve per-user ordering within each partition.
 
 ---
 
-## Running the System
+## Running the Exercise
 
 ### 1. Start Kafka
 
-Exercise 1 assumes Kafka is already running locally on `localhost:9092`. The simplest way is to use the Exercise 2 docker-compose from the `exercise2/` directory:
+Exercise 1 requires a Kafka broker on `localhost:9092`. Use the Exercise 2 docker-compose if you do not have one running:
 
 ```bash
 cd ../exercise2
@@ -172,7 +146,7 @@ bash topics.sh
 cd ../exercise1
 ```
 
-Alternatively, start any Kafka instance on port 9092 and create the nine topics listed above manually.
+Or start any Kafka instance on port 9092 and create the nine topics listed above.
 
 ### 2. Install dependencies
 
@@ -181,9 +155,9 @@ cd exercise1
 bun install
 ```
 
-### 3. Start all services
+### 3. Start services
 
-Open a separate terminal for each service and run:
+Open a separate terminal for each service:
 
 ```bash
 # Terminal 1
@@ -212,66 +186,43 @@ bun services/userInterface/userInterface.ts
 ```
 
 To run as a different user:
+
 ```bash
 USER_ID=alice bun services/userInterface/userInterface.ts
 ```
 
 ---
 
-## Example Interactions
+## Example Output
 
-All examples are typed into the UserInterface terminal (Terminal 8).
-
-### Weather query
 ```
 > What is the weather in London?
-
 Bot [weather]: Weather in London is 12°C and rainy.
-```
 
-### Currency exchange query
-```
 > USD to ILS
-
 Bot [exchange]: 1 USD = 3.7 ILS
-```
 
-### Math calculation
-```
 > 42 * 7
-
 Bot [math]: 294
-```
 
-```
 > (100 + 50) / 3
-
 Bot [math]: 50
-```
 
-### General chat
-```
 > Hello
-
 Bot [chat]: Hello! How can I help you today?
-```
 
-```
-> Tell me a joke
-
-Bot [chat]: Why do programmers prefer dark mode? Because light attracts bugs!
-```
-
-### Memory persistence
-
-Conversation history is stored in `services/memoryService/history.json`. When the service restarts it loads the existing file and resumes where it left off. The GeneralChatApp receives the full history as context with each request.
-
-### Reset command
-
-```
 > /reset
-
 [ui] Reset command sent.
 ```
 
-This deletes the current user's history from `history.json`. The next message starts a fresh conversation.
+---
+
+## Submission Artifacts
+
+The following items are required for submission:
+
+- `docker-compose.yml`
+- All TypeScript service files
+- Execution log showing the pipeline handling at least one message of each type
+- Architecture diagram
+- Written explanation of challenges encountered during implementation

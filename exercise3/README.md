@@ -1,16 +1,16 @@
-# Exercise 3 — Kafka Review Intelligence Pipeline
+# Exercise 3 — LLM Processing Pipeline
 
 ## Overview
 
 Exercise 3 builds a real-time review analysis system using Apache Kafka and the OpenAI API. User reviews are streamed through a Kafka pipeline, processed by an LLM that extracts structured sentiment insights, and displayed by a live analytics consumer.
 
-The system demonstrates three prompt engineering techniques applied in sequence:
+The processor applies three prompt engineering techniques in sequence:
 
-| Technique | Step | Purpose |
+| Step | Technique | Purpose |
 |---|---|---|
-| **Zero-Shot Classification** | Router | Decide whether a message is a product review or should be ignored |
-| **Structured JSON Output** | Analyzer | Extract `summary`, `sentiment`, `score`, and `aspects` as typed JSON |
-| **Self-Correction** | Corrector | Detect and fix logical inconsistencies in the LLM output |
+| 1 | Zero-Shot Classification | Decide whether the input is a product review or should be ignored |
+| 2 | Structured JSON Output | Extract `summary`, `sentiment`, `score`, and `aspects` as typed JSON |
+| 3 | Self-Correction | Detect and fix logical inconsistencies in the LLM output |
 
 ---
 
@@ -22,29 +22,28 @@ The system demonstrates three prompt engineering techniques applied in sequence:
               ▼
          producer.ts
               │
-    raw-reviews-topic
+       raw-reviews-topic
               │
               ▼
          processor.ts
-         ┌──────────────────────────────┐
-         │ 1. LLM Router                │
-         │    intent == analyzeReview?  │
-         │    → yes: continue           │
-         │    → no:  skip               │
-         │                              │
-         │ 2. LLM Analyzer              │
-         │    extract structured JSON   │
-         │                              │
-         │ 3. Self-Correction           │
-         │    score < 4 + Positive?     │
-         │    → re-run LLM              │
-         └──────────────────────────────┘
+         ┌──────────────────────────────────┐
+         │ Step 1 — Router                  │
+         │   Is this a product review?      │
+         │   yes → continue  /  no → skip   │
+         │                                  │
+         │ Step 2 — Analyzer                │
+         │   Extract structured JSON        │
+         │                                  │
+         │ Step 3 — Self-Correction         │
+         │   score < 4 and Positive?        │
+         │   → re-run LLM                   │
+         └──────────────────────────────────┘
               │
-   processed-insights-topic
+    processed-insights-topic
               │
               ▼
          analytics.ts
-         (real-time insights + running average)
+         (real-time insights + running average score)
 ```
 
 ---
@@ -52,50 +51,36 @@ The system demonstrates three prompt engineering techniques applied in sequence:
 ## Components
 
 ### producer.ts
-**File:** `producer.ts`
 
-CLI program that reads user reviews from stdin one line at a time. Each line is wrapped in a `ReviewEvent` with a generated UUID and sent to `raw-reviews-topic` using fire-and-forget semantics. The producer does not wait for processing results.
+CLI Kafka producer that reads user reviews from stdin one line at a time. Each line is wrapped in a `ReviewEvent` with a generated UUID and sent to `raw-reviews-topic`. Supports both interactive mode and single-shot mode via a command-line argument.
 
 ---
 
 ### processor.ts
-**File:** `processor.ts`
 
-Kafka consumer that processes every review through a three-step LLM pipeline:
+Kafka consumer that processes every review through a three-step LLM pipeline.
 
-1. **Router** — calls the LLM with `REVIEW_ROUTER_PROMPT` (zero-shot classification). If the message is not a product review the event is skipped and the offset is committed without publishing downstream.
-2. **Analyzer** — calls the LLM with `REVIEW_ANALYZER_PROMPT` (structured JSON output) to extract `summary`, `overall_sentiment`, `score`, and `aspects`.
-3. **Self-Correction** — if `score < 4` and `overall_sentiment === "Positive"`, the inconsistency is flagged and the LLM is called again with `SELF_CORRECTION_PROMPT` to produce a logically consistent result.
+**Step 1 — Router:** Calls the LLM with `reviewRouterPrompt` (zero-shot classification). If the message is not a product review, the event is skipped and the offset is committed without publishing downstream.
 
-Publishes a `ReviewInsightEvent` to `processed-insights-topic` after all steps complete.
+**Step 2 — Analyzer:** Calls the LLM with `reviewAnalyzerPrompt` (structured JSON output) to extract `summary`, `overall_sentiment`, `score`, and `aspects`.
+
+**Step 3 — Self-Correction:** If `score < 4` and `overall_sentiment === "Positive"`, the inconsistency is flagged and the LLM is called again with `selfCorrectionPrompt` to produce a logically consistent result.
 
 If the OpenAI API is unavailable, each step falls back to a deterministic stub so the pipeline continues running.
 
 ---
 
 ### analytics.ts
-**File:** `analytics.ts`
 
 Kafka consumer that subscribes to `processed-insights-topic` and prints formatted insights in real time. Maintains a running average of all review scores received in the current session.
 
 ---
 
-## Kafka Topics
+### prompts.ts
 
-| Topic | Producer | Consumer | Description |
-|---|---|---|---|
-| `raw-reviews-topic` | producer.ts | processor.ts | Inbound raw review text |
-| `processed-insights-topic` | processor.ts | analytics.ts | Enriched insights after LLM analysis |
+Defines all LLM prompt templates used by the processor.
 
-All messages use `reviewId` as the Kafka message key.
-
----
-
-## Prompt Templates
-
-All prompts are defined in `prompts.ts`.
-
-| Function | Technique | Used in step |
+| Function | Technique | Used in |
 |---|---|---|
 | `reviewRouterPrompt(text)` | Zero-Shot Classification | Step 1 — Router |
 | `reviewAnalyzerPrompt(text)` | Structured JSON Output | Step 2 — Analyzer |
@@ -103,11 +88,22 @@ All prompts are defined in `prompts.ts`.
 
 ---
 
-## Running Exercise 3
+## Topics
+
+| Topic | Producer | Consumer | Description |
+|---|---|---|---|
+| `raw-reviews-topic` | producer.ts | processor.ts | Inbound raw review text |
+| `processed-insights-topic` | processor.ts | analytics.ts | Enriched insights after LLM analysis |
+
+All messages use `reviewId` as the Kafka key.
+
+---
+
+## Running the Exercise
 
 ### 1. Set up environment
 
-Create a `.env` file at the project root (if it does not already exist):
+Create a `.env` file inside `exercise3/`:
 
 ```
 OPENAI_API_KEY=your_key_here
@@ -135,26 +131,24 @@ bun install
 
 ### 5. Start services
 
-Open three terminals from the `exercise3/` directory.
+Open a separate terminal for each service. Start the analytics consumer first so it captures all messages.
 
 ```bash
-# Terminal 1 — analytics consumer (start first to capture all insights)
+# Terminal 1 — Analytics (start first)
 bun run analytics.ts
 
-# Terminal 2 — processor
+# Terminal 2 — Processor
 bun run processor.ts
 
-# Terminal 3 — producer (interactive)
+# Terminal 3 — Producer (type reviews here)
 bun run producer.ts
 ```
-
-Type a review in Terminal 3 and press Enter. The processor enriches it through the LLM pipeline and the analytics consumer prints the result in real time.
 
 ---
 
 ## Example Output
 
-**Terminal 3 (producer):**
+**Producer terminal:**
 ```
 [producer] Connected. Type a review and press Enter. Ctrl+C to exit.
 
@@ -162,16 +156,15 @@ Type a review in Terminal 3 and press Enter. The processor enriches it through t
 [producer] Sent review a3f1c2d4-...
 ```
 
-**Terminal 2 (processor):**
+**Processor terminal:**
 ```
 [processor] Started. Waiting for reviews...
-
-[processor] Received review a3f1c2d4-...: "Great pizza and excellent service, would definitely come back."
-[processor] Routing decision for a3f1c2d4-...: intent="analyzeReview" reason="Message is a product review containing an opinion."
+[processor] Received review a3f1c2d4-...: "Great pizza and excellent service..."
+[processor] Routing decision: intent="analyzeReview"
 [processor] Insight published for a3f1c2d4-...
 ```
 
-**Terminal 1 (analytics):**
+**Analytics terminal:**
 ```
 [analytics] Started. Listening for insights...
 
@@ -185,9 +178,9 @@ Summary:   Great pizza and excellent service.
 Average Score: 8.0/10  (over 1 review)
 ```
 
-### Self-Correction Example
+**Self-correction example:**
 
-When the LLM returns a contradictory result (`score < 4` and `sentiment == "Positive"`), the processor detects the inconsistency and re-runs the LLM:
+When the LLM returns a contradictory result (`score < 4` and `sentiment == "Positive"`):
 
 ```
 [processor] Inconsistency detected for b7e9a1f2-... (score=2, sentiment=Positive). Running self-correction...
@@ -195,15 +188,25 @@ When the LLM returns a contradictory result (`score < 4` and `sentiment == "Posi
 [processor] Insight published for b7e9a1f2-...
 ```
 
-### Non-Review Routing
+**Non-review routing:**
 
-Messages that are not product reviews are skipped and never reach `processed-insights-topic`:
+Messages that are not product reviews are skipped entirely:
 
 ```
 [processor] Received review c2d4e6f8-...: "hello"
-[processor] Routing decision for c2d4e6f8-...: intent="ignore" reason="Message is a greeting, not a review."
+[processor] Routing decision: intent="ignore"
 [processor] Skipping c2d4e6f8-... — not a review.
 ```
+
+**Sarcasm test case:**
+
+The following Hebrew sarcastic message must be classified as `Negative` sentiment:
+
+```
+ממש תודה למארחת שגלגלה עיניים
+```
+
+This tests the model's ability to detect negative sentiment expressed through irony rather than explicit negative language.
 
 ---
 
