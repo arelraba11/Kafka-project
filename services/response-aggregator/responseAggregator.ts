@@ -29,7 +29,7 @@ await subscribeAndRun(
   [TOPICS.APP_RESULTS],
   async (_topic, _key, value) => {
     const event = value as AppResultEvent;
-    const { userId, type, timestamp } = event;
+    const { userId, type } = event;
 
     console.log(`[aggregator] userId=${userId} type=${type} success=${event.success}`);
 

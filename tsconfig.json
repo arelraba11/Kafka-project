@@ -11,5 +11,9 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "noEmit": true
-  }
+  },
+  "include": [
+    "shared/**/*",
+    "services/**/*"
+  ]
 }

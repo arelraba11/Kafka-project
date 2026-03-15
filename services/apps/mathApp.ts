@@ -91,7 +91,7 @@ await subscribeAndRun(
   [TOPICS.INTENT_MATH],
   async (_topic, _key, value) => {
     const event = value as IntentMathEvent;
-    const { userId, expression, timestamp } = event;
+    const { userId, expression } = event;
 
     console.log(`[math] userId=${userId} expression="${expression}"`);
 
