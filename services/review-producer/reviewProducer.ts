@@ -1,19 +1,17 @@
-// producer.ts — CLI fire-and-forget review producer
+// reviewProducer.ts — CLI fire-and-forget review producer
 //
 // Usage:
-//   bun run producer.ts
+//   bun run services/review-producer/reviewProducer.ts
 //   Type a review and press Enter. Ctrl+C to exit.
 //
 // Each line of stdin is wrapped in a ReviewEvent and sent to raw-reviews-topic.
 
-import { createProducer } from "./kafka/kafkaClient";
-import { TOPICS } from "./shared/topics";
-import type { ReviewEvent } from "./shared/types";
-
-const CLIENT_ID = process.env.REVIEW_PRODUCER_CLIENT_ID ?? "review-producer";
+import { createProducer } from "../../shared/kafka/client";
+import { TOPICS } from "../../shared/topics";
+import type { ReviewEvent } from "../../shared/types/reviews";
 
 async function main(): Promise<void> {
-  const producer = await createProducer(CLIENT_ID);
+  const producer = await createProducer();
 
   console.log("[producer] Connected. Type a review and press Enter. Ctrl+C to exit.\n");
   process.stdout.write("> ");

@@ -7,20 +7,20 @@ export interface AspectSentiment {
   sentiment: "Positive" | "Negative" | "Neutral";
 }
 
-// Published to raw-reviews-topic by producer.ts
+// Published to raw-reviews-topic by review-producer
 export interface ReviewEvent {
   reviewId: string;
   text: string;
   timestamp: string; // ISO 8601
 }
 
-// Router decision returned by REVIEW_ROUTER_PROMPT
+// Router decision returned by reviewRouterPrompt
 export interface RouterDecision {
   intent: "analyzeReview" | "ignore";
   reason: string;
 }
 
-// LLM analysis result returned by REVIEW_ANALYZER_PROMPT
+// LLM analysis result returned by reviewAnalyzerPrompt
 export interface AnalysisResult {
   summary: string;
   overall_sentiment: Sentiment;
@@ -28,7 +28,7 @@ export interface AnalysisResult {
   aspects: AspectSentiment[];
 }
 
-// Published to processed-insights-topic by processor.ts
+// Published to processed-insights-topic by review-processor
 export interface ReviewInsightEvent {
   reviewId: string;
   originalText: string;

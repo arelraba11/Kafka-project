@@ -1,13 +1,12 @@
-// analytics.ts — Real-time insights display consumer
+// reviewAnalytics.ts — Real-time insights display consumer
 //
 // Consumes processed-insights-topic and prints formatted output for each message.
 
-import { createConsumer } from "./kafka/kafkaClient";
-import { TOPICS } from "./shared/topics";
-import type { ReviewInsightEvent } from "./shared/types";
+import { createConsumer } from "../../shared/kafka/client";
+import { TOPICS } from "../../shared/topics";
+import type { ReviewInsightEvent } from "../../shared/types/reviews";
 
-const CLIENT_ID = process.env.ANALYTICS_CLIENT_ID ?? "analytics-consumer";
-const GROUP_ID  = process.env.ANALYTICS_GROUP_ID  ?? "review-analytics-group";
+const GROUP_ID = process.env.ANALYTICS_GROUP_ID ?? "review-analytics-group";
 
 // Running average state
 let totalScore  = 0;
@@ -32,7 +31,7 @@ function printInsight(event: ReviewInsightEvent): void {
 }
 
 async function main(): Promise<void> {
-  const consumer = await createConsumer(GROUP_ID, CLIENT_ID);
+  const consumer = await createConsumer(GROUP_ID);
 
   await consumer.subscribe({ topic: TOPICS.PROCESSED_INSIGHTS, fromBeginning: false });
 

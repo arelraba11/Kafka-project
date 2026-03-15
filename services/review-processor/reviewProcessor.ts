@@ -1,4 +1,4 @@
-// processor.ts — Core LLM processing service
+// reviewProcessor.ts — Core LLM processing service
 //
 // Pipeline per message:
 //   1. Consume ReviewEvent from raw-reviews-topic
@@ -7,17 +7,16 @@
 //   4. Self-Correct — if score < 4 AND sentiment == "Positive", re-call LLM
 //   5. Publish ReviewInsightEvent to processed-insights-topic
 //
-// LLM calls go through callLLM() → generateText() (OpenAI). On failure the
+// LLM calls go through callLLM() (OpenAI). On failure the
 // processor catches the error and falls back to deterministic stubs.
 
-import { generateText } from "./llm/llmClient";
-import { createProducer, createConsumer } from "./kafka/kafkaClient";
-import { TOPICS } from "./shared/topics";
-import { reviewRouterPrompt, reviewAnalyzerPrompt, selfCorrectionPrompt } from "./prompts";
-import type { ReviewEvent, RouterDecision, AnalysisResult, ReviewInsightEvent } from "./shared/types";
+import { callLLM as generateText } from "../../shared/llm/openai";
+import { createProducer, createConsumer } from "../../shared/kafka/client";
+import { TOPICS } from "../../shared/topics";
+import { reviewRouterPrompt, reviewAnalyzerPrompt, selfCorrectionPrompt } from "../../shared/prompts/prompts";
+import type { ReviewEvent, RouterDecision, AnalysisResult, ReviewInsightEvent } from "../../shared/types/reviews";
 
-const CLIENT_ID = process.env.PROCESSOR_CLIENT_ID ?? "review-processor";
-const GROUP_ID  = process.env.PROCESSOR_GROUP_ID  ?? "review-processor-group";
+const GROUP_ID = process.env.PROCESSOR_GROUP_ID ?? "review-processor-group";
 
 // ---------------------------------------------------------------------------
 // LLM — delegates to the shared OpenAI client
@@ -92,8 +91,8 @@ async function selfCorrect(
 // Main consumer loop
 // ---------------------------------------------------------------------------
 async function main(): Promise<void> {
-  const consumer = await createConsumer(GROUP_ID, CLIENT_ID);
-  const producer = await createProducer(CLIENT_ID);
+  const consumer = await createConsumer(GROUP_ID);
+  const producer = await createProducer();
 
   await consumer.subscribe({ topic: TOPICS.RAW_REVIEWS, fromBeginning: false });
 
