@@ -2,98 +2,159 @@
 
 ## 1. Project Overview
 
-This repository is a progressive Kafka learning course that builds a multi-exercise event-driven AI system. Each exercise adds a new layer of complexity on top of the previous one, culminating in a production-style streaming AI pipeline.
+This repository is a progressive Kafka learning course that builds a multi-exercise event-driven AI system. Each exercise adds a new layer of complexity on top of the previous one.
 
 The course contains two tracks:
 
-- **Java Track** (`kafka-basics`, `kafka-producer-wikimedia`, `kafka-consumer-opensearch`, `kafka-streams-wikimedia`) — foundational Kafka producer/consumer/streams demos using the official `org.apache.kafka.clients` library.
-- **Exercise Track** (`exercise1` through `exercise4`) — a progressive system using TypeScript (Bun + KafkaJS) and Python workers, building toward an event-driven AI agent.
+- **Java Track** (`kafka-basics`, `kafka-producer-wikimedia`, `kafka-consumer-opensearch`, `kafka-streams-wikimedia`) — foundational Kafka producer/consumer/streams demos using `org.apache.kafka.clients`.
+- **Exercise Track** (`exercise1`, `exercise2`, `exercise3`) — a progressive TypeScript system (Bun + KafkaJS) building toward an event-driven AI agent. All services live in the top-level `services/` directory and share modules from `shared/`.
 
 ---
 
-## 2. System Architecture
-
-The system follows an **event-driven microservices architecture** where every service communicates exclusively through Kafka topics. No direct service-to-service calls are made.
-
-```
-User Input
-    │
-    ▼
-[UserInterface / Producer]
-    │  user-input-events
-    ▼
-[RouterService / GuardrailService]
-    │  intent-* topics / router_decision_events
-    ▼
-[Domain Apps / LLM Workers]
-    │  app-results / llm_response_events / analysis-*
-    ▼
-[Aggregator / ResponseAggregator]
-    │  bot-responses / sanitized-messages
-    ▼
-[UserInterface / Analytics / Insight Aggregator]
-```
-
-### Core Patterns Used
-
-- **Fan-out**: One topic consumed by multiple consumer groups (Exercise 4: `sanitized-messages` → sentiment + urgency workers)
-- **Stream Join**: Correlating events by message ID across multiple topics (Exercise 4: aggregator joins sentiment + urgency)
-- **LLM-as-router**: Using language models for intent classification instead of regex (Exercise 2)
-- **Self-Correcting Pipeline**: Multi-step LLM chain with validation pass (Exercise 3)
-- **Parallel Inference**: Multiple ML workers consuming the same topic in parallel (Exercise 4)
-
----
-
-## 3. Repository Structure
+## 2. Repository Structure
 
 ```
 kafka-beginners-course-main/
-├── .claude/                        # Claude Code workspace
-│   ├── assignments/                # Exercise task definitions
-│   ├── rules/                      # Code style and project rules
-│   └── skills/                     # Kafka skill templates
+├── .claude/                        # Claude Code workspace (assignments, rules, skills)
+├── .env                            # OPENAI_API_KEY, ROUTER_MODE (not committed)
+├── .env.example                    # Environment variable reference
+├── package.json                    # Bun dependencies: kafkajs, openai
+├── tsconfig.json                   # TypeScript config (target: ES2022, strict)
+├── build.gradle                    # Root Gradle config
+├── settings.gradle                 # Gradle multi-module definitions
 │
 ├── kafka-basics/                   # Java: Producer/Consumer fundamentals
-├── kafka-producer-wikimedia/       # Java: Wikimedia → Kafka producer
-├── kafka-consumer-opensearch/      # Java: Kafka → OpenSearch consumer
+├── kafka-producer-wikimedia/       # Java: Wikimedia SSE → Kafka producer
+├── kafka-consumer-opensearch/      # Java: Kafka → OpenSearch bulk consumer
 ├── kafka-streams-wikimedia/        # Java: Kafka Streams aggregations
 │
-├── exercise1/                      # Distributed chatbot (8 microservices)
-│   ├── shared/                     # Kafka client, topics, shared types
-│   └── services/                   # userInterface, memoryService, routerService, apps, aggregator
+├── infra/
+│   ├── docker-compose.yml          # Single-broker Kafka 3.8.0 (KRaft mode, port 9092)
+│   └── topics.sh                   # Creates all Kafka topics for Exercises 1–3
 │
-├── exercise2/                      # LLM prompt engineering pipeline
-│   ├── shared/                     # Topics, event types
-│   ├── kafka/                      # Producer/consumer utilities
-│   ├── prompts/                    # LLM prompt templates
-│   └── services/                   # guardrail, llmRouter, llmExtraction, jsonParser, cotMath
+├── scripts/
+│   ├── start-ex1.sh                # Start Exercise 1 services (background, logs to logs/)
+│   ├── start-ex2.sh                # Start Exercise 2 services (background, logs to logs/)
+│   ├── start-ex3.sh                # Start Exercise 3 services (background, logs to logs/)
+│   └── stop-all.sh                 # Kill all Bun processes (pkill -f bun)
 │
-├── exercise3/                      # Real-time review analysis
-│   ├── shared/                     # Topics, types
-│   ├── kafka/                      # KafkaJS client factory
-│   ├── llm/                        # OpenAI client wrapper
-│   ├── producer.ts                 # Review producer
-│   ├── processor.ts                # 3-step LLM pipeline
-│   ├── analytics.ts                # Real-time insight consumer
-│   └── prompts.ts                  # LLM prompt templates
+├── shared/                         # Shared modules used by all TypeScript services
+│   ├── kafka/
+│   │   └── client.ts               # KafkaJS factory: createProducer, createConsumer, sendMessage, subscribeAndRun
+│   ├── llm/
+│   │   └── openai.ts               # OpenAI wrapper: callLLM(prompt) → string (gpt-4o-mini)
+│   ├── prompts/
+│   │   └── prompts.ts              # All LLM prompt templates (Exercises 2 and 3)
+│   ├── types/
+│   │   ├── events.ts               # Exercise 1 + 2 event types
+│   │   ├── conversation.ts         # ConversationHistory type
+│   │   └── reviews.ts              # Exercise 3 review types
+│   └── topics.ts                   # Centralized Kafka topic name constants
 │
-├── exercise4/                      # Streaming AI customer support analyzer
-│   ├── shared/                     # Topics, types, benchmark utilities
-│   ├── kafka/                      # KafkaJS client factory
-│   ├── python-workers/             # HuggingFace ML inference workers
-│   ├── producer.ts                 # Customer message producer
-│   ├── sanitizer.ts                # PII scrubber (Ollama)
-│   ├── insight-aggregator.ts       # Stream joiner + alerting
-│   └── prompts.ts                  # Ollama prompt for sanitization
+├── services/                       # All TypeScript microservices
+│   ├── user-interface/
+│   │   └── userInterface.ts        # CLI stdin/stdout — start MANUALLY
+│   ├── memory-service/
+│   │   └── memoryService.ts        # Conversation history (persists to history.json)
+│   ├── router-service/
+│   │   └── routerService.ts        # Regex or LLM router (reads ROUTER_MODE env var)
+│   ├── response-aggregator/
+│   │   └── responseAggregator.ts   # Formats app results → bot-responses
+│   ├── apps/
+│   │   ├── mathApp.ts              # Arithmetic parser (no eval)
+│   │   ├── weatherApp.ts           # Mock weather for 10 cities
+│   │   ├── exchangeApp.ts          # Static currency rates (ILS cross-rates)
+│   │   └── generalChatApp.ts       # Keyword-matching fallback chat
+│   ├── guardrail-service/
+│   │   └── guardrailService.ts     # Regex safety filter (politics, malware keywords)
+│   ├── llm-router-service/
+│   │   └── llmRouterService.ts     # Few-Shot intent classification (gpt-4o-mini)
+│   ├── cot-math-service/
+│   │   └── cotMathService.ts       # Chain-of-Thought word problem solver (gpt-4o-mini)
+│   ├── review-producer/
+│   │   └── reviewProducer.ts       # Reads stdin → raw-reviews-topic
+│   ├── review-processor/
+│   │   └── reviewProcessor.ts      # 3-step LLM pipeline (gpt-4o-mini)
+│   └── review-analytics/
+│       └── reviewAnalytics.ts      # Real-time insight display + running avg score
 │
-├── conduktor-platform/             # Conduktor platform docker setup
-├── infra/logs/                     # Service execution logs
-├── services/chat/                  # Persisted conversation history
-├── .env                            # OPENAI_API_KEY, ROUTER_MODE
-├── .env.example                    # Environment variable reference
-├── build.gradle                    # Root Gradle config
-└── settings.gradle                 # Gradle multi-module definitions
+└── logs/                           # Created automatically by start-ex*.sh scripts
+    ├── memory-service.log
+    ├── router-service.log
+    ├── response-aggregator.log
+    ├── math-app.log
+    ├── weather-app.log
+    ├── exchange-app.log
+    ├── general-chat-app.log
+    ├── guardrail-service.log       # Exercise 2 only
+    ├── llm-router-service.log      # Exercise 2 only
+    ├── cot-math-service.log        # Exercise 2 only
+    ├── review-analytics.log        # Exercise 3 only
+    └── review-processor.log        # Exercise 3 only
 ```
+
+---
+
+## 3. Shared Modules
+
+### `shared/kafka/client.ts`
+
+Single KafkaJS client factory used by every TypeScript service:
+
+```typescript
+const kafka = new Kafka({ clientId: "distributed-bot", brokers: ["localhost:9092"] });
+```
+
+| Export | Signature | Purpose |
+|---|---|---|
+| `createProducer` | `() → Promise<Producer>` | Connect and return producer |
+| `createConsumer` | `(groupId: string) → Promise<Consumer>` | Connect and return consumer |
+| `sendMessage` | `(producer, topic, key, value)` | JSON-stringify and send |
+| `subscribeAndRun` | `(consumer, topics[], handler)` | Subscribe and process (fromBeginning=false) |
+| `registerShutdown` | `(resources[])` | SIGINT/SIGTERM graceful disconnect |
+
+### `shared/topics.ts`
+
+All topic names are exported as named constants to avoid magic strings:
+
+| Constant | Topic Name |
+|---|---|
+| `USER_INPUT` | `user-input-events` |
+| `USER_CONTROL` | `user-control-events` |
+| `HISTORY_UPDATE` | `conversation-history-update` |
+| `INTENT_MATH` | `intent-math` |
+| `INTENT_WEATHER` | `intent-weather` |
+| `INTENT_EXCHANGE` | `intent-exchange` |
+| `INTENT_CHAT` | `intent-general-chat` |
+| `APP_RESULTS` | `app-results` |
+| `BOT_RESPONSES` | `bot-responses` |
+| `ROUTER_DECISION` | `router-decision-events` |
+| `GUARDRAIL_VIOLATION` | `guardrail-violation-events` |
+| `RAW_REVIEWS` | `raw-reviews-topic` |
+| `PROCESSED_INSIGHTS` | `processed-insights-topic` |
+
+### `shared/llm/openai.ts`
+
+```typescript
+export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+export async function callLLM(prompt: string): Promise<string>
+// Model: gpt-4o-mini
+// Strips markdown code fences from response before returning
+```
+
+### `shared/prompts/prompts.ts`
+
+All LLM prompt templates in one place:
+
+| Function | Used By | Technique |
+|---|---|---|
+| `llmRouterPrompt(userInput)` | `llmRouterService.ts` | Few-Shot classification → `{ intent, parameters, confidence }` |
+| `llmExtractionPrompt(intent, input)` | `llmRouterService.ts` | Structured JSON extraction |
+| `cotMathPrompt(wordProblem)` | `cotMathService.ts` | Chain-of-Thought → `{ reasoning, expression }` |
+| `generalChatPersonaPrompt` | `generalChatApp.ts` | System persona ("Pipeline", data-engineering metaphors) |
+| `reviewRouterPrompt(input)` | `reviewProcessor.ts` | Zero-Shot classification → `{ intent, reason }` |
+| `reviewAnalyzerPrompt(text)` | `reviewProcessor.ts` | Structured JSON → `{ summary, sentiment, score, aspects[] }` |
+| `selfCorrectionPrompt(text, prev, score)` | `reviewProcessor.ts` | Self-correction for score/sentiment inconsistencies |
 
 ---
 
@@ -103,408 +164,341 @@ kafka-beginners-course-main/
 
 | Topic | Producer | Consumer | Purpose |
 |---|---|---|---|
-| `demo_java` | ProducerDemo, ProducerDemoKeys, ProducerDemoWithCallback | ConsumerDemo, ConsumerDemoWithShutdown, ConsumerDemoCooperative | Basic producer/consumer demos |
+| `demo_java` | ProducerDemo | ConsumerDemo | Basic producer/consumer demos |
 | `wikimedia.recentchange` | WikimediaChangesProducer | OpenSearchConsumer, WikimediaStreamsApp | Real-time Wikimedia edit stream |
 
-### Exercise 1 — Distributed Chatbot
+### Exercise 1 + 2 — Chatbot Pipeline
 
 | Topic | Producer | Consumer | Purpose |
 |---|---|---|---|
-| `user-input-events` | UserInterface | RouterService, MemoryService | User message broadcast |
-| `user-control-events` | UserInterface | MemoryService | Clear history command |
-| `conversation-history-update` | MemoryService | RouterService | Context sync for routing decisions |
-| `intent-math` | RouterService | MathApp | Math calculation requests |
-| `intent-weather` | RouterService | WeatherApp | Weather lookup requests |
-| `intent-exchange` | RouterService | ExchangeApp | Currency exchange requests |
-| `intent-general-chat` | RouterService | GeneralChatApp | Fallback chat requests |
-| `app-results` | MathApp, WeatherApp, ExchangeApp, GeneralChatApp | ResponseAggregator, MemoryService | App responses |
-| `bot-responses` | ResponseAggregator | UserInterface | Final formatted reply to user |
-
-### Exercise 2 — LLM Prompt Engineering
-
-| Topic | Producer | Consumer | Purpose |
-|---|---|---|---|
-| `user_input_events` | External source | GuardrailService, LLMRouterService | Raw user input |
-| `router_decision_events` | LLMRouterService | LLMExtractionService, CotMathService | Classified intent with confidence score |
-| `llm_response_events` | LLMExtractionService | JSONParserService | Raw LLM structured output |
-| `function_execution_requests` | JSONParserService | Domain apps (Exercise 1) | Typed, validated function calls |
-| `guardrail_violation_events` | GuardrailService | — | Unsafe input audit log |
-| `cot_math_expression_events` | CotMathService | MathApp | Chain-of-thought math expressions |
-| `bot_output_events` | Domain apps | ResponseAggregator | App results |
+| `user-input-events` | UserInterface | RouterService, MemoryService, GuardrailService (Ex2) | User message broadcast |
+| `user-control-events` | UserInterface | MemoryService | Reset conversation history |
+| `conversation-history-update` | MemoryService | RouterService | History sync for routing context |
+| `router-decision-events` | RouterService (Ex2 path) | LLMRouterService, CotMathService | LLM intent + parameters |
+| `intent-math` | RouterService / CotMathService | MathApp | Math calculation request |
+| `intent-weather` | RouterService / LLMRouterService | WeatherApp | Weather lookup request |
+| `intent-exchange` | RouterService / LLMRouterService | ExchangeApp | Currency exchange request |
+| `intent-general-chat` | RouterService / LLMRouterService | GeneralChatApp | Fallback chat request |
+| `app-results` | MathApp, WeatherApp, ExchangeApp, GeneralChatApp | ResponseAggregator, MemoryService | App response results |
+| `bot-responses` | ResponseAggregator | UserInterface | Final formatted reply |
+| `guardrail-violation-events` | GuardrailService | — (audit log only) | Blocked unsafe input |
 
 ### Exercise 3 — Review Analysis
 
 | Topic | Producer | Consumer | Purpose |
 |---|---|---|---|
-| `raw-reviews-topic` | producer.ts | processor.ts | Raw review text |
-| `processed-insights-topic` | processor.ts | analytics.ts | Structured LLM-analyzed insights |
-
-### Exercise 4 — Customer Support Analyzer
-
-| Topic | Producer | Consumer | Purpose |
-|---|---|---|---|
-| `raw-customer-messages` | producer.ts | sanitizer.ts | Raw customer support messages |
-| `sanitized-messages` | sanitizer.ts | sentiment_worker.py (`sentiment-group`), urgency_worker.py (`urgency-group`) | PII-scrubbed messages (fan-out) |
-| `analysis-sentiment` | sentiment_worker.py | insight-aggregator.ts | Sentiment classification result |
-| `analysis-urgency` | urgency_worker.py | insight-aggregator.ts | Urgency classification result |
+| `raw-reviews-topic` | ReviewProducer | ReviewProcessor | Raw review text (UUID keyed) |
+| `processed-insights-topic` | ReviewProcessor | ReviewAnalytics | Structured LLM-analyzed insight |
 
 ---
 
-## 5. Microservices
+## 5. Services Architecture
 
-### Java Track
+### Exercise 1 — Distributed Chatbot (Regex Router)
 
-| Service | Location | Consumes | Produces | Responsibility |
+| Service | File | Consumer Group | Consumes | Produces |
 |---|---|---|---|---|
-| ProducerDemo | `kafka-basics` | — | `demo_java` | Basic producer demo |
-| ConsumerDemo | `kafka-basics` | `demo_java` | — | Basic consumer demo |
-| WikimediaChangesProducer | `kafka-producer-wikimedia` | Wikimedia SSE stream | `wikimedia.recentchange` | Streams Wikipedia edits into Kafka |
-| OpenSearchConsumer | `kafka-consumer-opensearch` | `wikimedia.recentchange` | — | Indexes events in OpenSearch via bulk API |
-| WikimediaStreamsApp | `kafka-streams-wikimedia` | `wikimedia.recentchange` | — | Aggregates bot counts, event counts, site counts |
+| UserInterface | `user-interface/userInterface.ts` | `ui-service` | `bot-responses` | `user-input-events`, `user-control-events` |
+| MemoryService | `memory-service/memoryService.ts` | `memory-service` | `user-input-events`, `app-results`, `user-control-events` | `conversation-history-update` |
+| RouterService | `router-service/routerService.ts` | `router-service` | `user-input-events`, `conversation-history-update` | `intent-*`, `router-decision-events` |
+| MathApp | `apps/mathApp.ts` | `math-service` | `intent-math` | `app-results` |
+| WeatherApp | `apps/weatherApp.ts` | `weather-service` | `intent-weather` | `app-results` |
+| ExchangeApp | `apps/exchangeApp.ts` | `exchange-service` | `intent-exchange` | `app-results` |
+| GeneralChatApp | `apps/generalChatApp.ts` | `chat-service` | `intent-general-chat` | `app-results` |
+| ResponseAggregator | `response-aggregator/responseAggregator.ts` | `response-aggregator` | `app-results` | `bot-responses` |
 
-### Exercise 1 — TypeScript (Bun + KafkaJS)
+**RouterService classification logic (ROUTER_MODE=regex):**
+- Math: `/[\d]+\s*[+\-*/]\s*[\d]+/`
+- Weather: `/\b(weather|temperature|forecast|hot|cold|rain|sunny)\b/i`
+- Exchange: `/\b(USD|EUR|ILS|GBP|JPY|CHF|CAD|AUD)\b/i`
+- Default: general-chat
 
-| Service | Location | Consumes | Produces | Responsibility |
-|---|---|---|---|---|
-| UserInterface | `exercise1/services/userInterface` | `bot-responses` | `user-input-events`, `user-control-events` | CLI input/output |
-| MemoryService | `exercise1/services/memoryService` | `user-input-events`, `app-results`, `user-control-events` | `conversation-history-update` | Persists conversation history |
-| RouterService | `exercise1/services/routerService` | `user-input-events`, `conversation-history-update` | `intent-math`, `intent-weather`, `intent-exchange`, `intent-general-chat` | Intent classification via regex |
-| MathApp | `exercise1/services/mathApp` | `intent-math` | `app-results` | Arithmetic expression evaluator |
-| WeatherApp | `exercise1/services/weatherApp` | `intent-weather` | `app-results` | Mock weather data lookup |
-| ExchangeApp | `exercise1/services/exchangeApp` | `intent-exchange` | `app-results` | Currency exchange via ILS cross-rates |
-| GeneralChatApp | `exercise1/services/generalChatApp` | `intent-general-chat` | `app-results` | Rule-based keyword chat |
-| ResponseAggregator | `exercise1/services/responseAggregator` | `app-results` | `bot-responses` | Formats and forwards bot reply |
+**MemoryService** persists conversation turns to `services/memory-service/history.json`.
 
-### Exercise 2 — TypeScript (Bun + KafkaJS)
+### Exercise 2 — LLM Prompt Engineering (adds to Exercise 1)
 
-| Service | Location | Consumes | Produces | Responsibility |
-|---|---|---|---|---|
-| GuardrailService | `exercise2/services/guardrailService.ts` | `user_input_events` | `guardrail_violation_events` | Blocks unsafe content via LLM |
-| LLMRouterService | `exercise2/services/llmRouterService.ts` | `user_input_events` | `router_decision_events` | Few-Shot intent classification |
-| LLMExtractionService | `exercise2/services/llmExtractionService.ts` | `router_decision_events` | `llm_response_events` | Structured JSON parameter extraction |
-| JSONParserService | `exercise2/services/jsonParserService.ts` | `llm_response_events` | `function_execution_requests` | Parses and validates LLM JSON output |
-| CotMathService | `exercise2/services/cotMathService.ts` | `router_decision_events` | `cot_math_expression_events` | Chain-of-Thought word problem solver |
+Requires Exercise 1 running with `ROUTER_MODE=llm`. Three additional services intercept the pipeline.
 
-### Exercise 3 — TypeScript (Bun + KafkaJS)
+| Service | File | Consumer Group | Consumes | Produces | LLM |
+|---|---|---|---|---|---|
+| GuardrailService | `guardrail-service/guardrailService.ts` | `guardrail-service` | `user-input-events` | `guardrail-violation-events` | None (regex) |
+| LLMRouterService | `llm-router-service/llmRouterService.ts` | `llm-router-service` | `router-decision-events` | `intent-weather`, `intent-exchange`, `intent-general-chat`, `app-results` | gpt-4o-mini |
+| CotMathService | `cot-math-service/cotMathService.ts` | `cot-math-service` | `router-decision-events` | `intent-math` | gpt-4o-mini |
 
-| Service | Location | Consumes | Produces | Responsibility |
-|---|---|---|---|---|
-| producer | `exercise3/producer.ts` | stdin | `raw-reviews-topic` | CLI review ingestion |
-| processor | `exercise3/processor.ts` | `raw-reviews-topic` | `processed-insights-topic` | 3-step LLM pipeline (classify → extract → self-correct) |
-| analytics | `exercise3/analytics.ts` | `processed-insights-topic` | — | Real-time insight display |
+**GuardrailService** blocks on keyword lists:
+- Politics: `politics`, `election`, `government`, `president`, `war`, …
+- Malware: `hack`, `exploit`, `sql injection`, `malware`, `virus`, …
 
-### Exercise 4 — TypeScript + Python
+**LLMRouterService** uses Few-Shot prompting with 7 examples to classify into `getWeather | currencyExchange | generalChat` and extract parameters as structured JSON.
 
-| Service | Location | Consumes | Produces | Responsibility |
-|---|---|---|---|---|
-| producer | `exercise4/producer.ts` | stdin | `raw-customer-messages` | CLI customer message ingestion |
-| sanitizer | `exercise4/sanitizer.ts` | `raw-customer-messages` | `sanitized-messages` | PII scrubbing via Ollama |
-| sentiment_worker | `exercise4/python-workers/sentiment_worker.py` | `sanitized-messages` | `analysis-sentiment` | HuggingFace sentiment classification |
-| urgency_worker | `exercise4/python-workers/urgency_worker.py` | `sanitized-messages` | `analysis-urgency` | HuggingFace zero-shot urgency detection |
-| insight-aggregator | `exercise4/insight-aggregator.ts` | `analysis-sentiment`, `analysis-urgency` | — | Joins sentiment + urgency, fires alerts |
+**CotMathService** distinguishes pure expressions (`42 * 7` → pass directly to `intent-math`) from word problems (`5 apples minus 2` → LLM Chain-of-Thought → extract expression).
+
+### Exercise 3 — Review Analysis Pipeline (standalone)
+
+| Service | File | Consumer Group | Consumes | Produces | LLM |
+|---|---|---|---|---|---|
+| ReviewProducer | `review-producer/reviewProducer.ts` | — (producer only) | stdin | `raw-reviews-topic` | None |
+| ReviewProcessor | `review-processor/reviewProcessor.ts` | `review-processor-group` | `raw-reviews-topic` | `processed-insights-topic` | gpt-4o-mini |
+| ReviewAnalytics | `review-analytics/reviewAnalytics.ts` | `review-analytics-group` | `processed-insights-topic` | — (stdout) | None |
+
+**ReviewProcessor** 3-step pipeline:
+1. **Step 1 — Zero-Shot router:** Is this a review or not? (`intent: "analyzeReview" | "ignore"`)
+2. **Step 2 — Structured extraction:** Extract `{ summary, overall_sentiment, score (1–10), aspects[] }`
+3. **Step 3 — Self-correction:** If `score < 4` and `sentiment == "Positive"`, re-run with correction prompt
+
+**ReviewAnalytics** displays each insight in the terminal and maintains a running average score.
 
 ---
 
 ## 6. Event Flow
 
-### Exercise 1 — Chatbot Pipeline
+### Exercise 1 — Chatbot Pipeline (ROUTER_MODE=regex)
 
 ```
-stdin → UserInterface
-           │── user-input-events ──► RouterService ──► intent-math ──► MathApp ──┐
-           │                     └──► MemoryService                               │
-           │                              │                                        │
-           │                    conversation-history-update                        │
-           │                              ▼                                        ▼
-           │                         RouterService           WeatherApp ──────► app-results
-           │                                                 ExchangeApp ─────►    │
-           │                                              GeneralChatApp ────►    │
-           │                                                                       ▼
-           │                                                            ResponseAggregator
-           │                                                                       │
-           └◄────────────────── bot-responses ◄────────────────────────────────────┘
+stdin
+  │
+  ▼
+UserInterface ──► [user-input-events]
+                       │
+           ┌───────────┴───────────┐
+           ▼                       ▼
+     MemoryService           RouterService (regex classify)
+    (append user msg)              │
+           │               ┌───────┴────────┐──────────┐──────────────┐
+    [history-update]  [intent-math]  [intent-weather] [intent-exchange] [intent-general-chat]
+           │               │               │               │               │
+           ▼               ▼               ▼               ▼               ▼
+     RouterService      MathApp       WeatherApp      ExchangeApp   GeneralChatApp
+                           └──────────┬──────────┘──────────┘──────────────┘
+                                      ▼
+                                [app-results]
+                                      │
+                           ┌──────────┴──────────┐
+                           ▼                     ▼
+                     MemoryService      ResponseAggregator
+                   (append bot msg)           │
+                                       [bot-responses]
+                                              │
+                                              ▼
+                                       UserInterface (display)
 ```
 
-### Exercise 2 — LLM Prompt Engineering Pipeline
+### Exercise 2 — LLM Pipeline (ROUTER_MODE=llm)
 
 ```
-user_input_events
-    ├──► GuardrailService ──► guardrail_violation_events (if unsafe)
-    └──► LLMRouterService ──► router_decision_events
-                                  ├──► LLMExtractionService ──► llm_response_events
-                                  │         └──► JSONParserService ──► function_execution_requests
-                                  └──► CotMathService ──► cot_math_expression_events
+[user-input-events]
+       │
+       ├──► GuardrailService ──► [guardrail-violation-events]  (if unsafe, stop here)
+       │
+       └──► RouterService ──► [router-decision-events]
+                                       │
+                           ┌───────────┴──────────┐
+                           ▼                      ▼
+                   LLMRouterService         CotMathService
+                  (Few-Shot, gpt-4o-mini)   (CoT, gpt-4o-mini)
+                           │                      │
+               ┌───────────┤               [intent-math]
+               ▼           ▼                      │
+     [intent-weather] [intent-exchange]           ▼
+     [intent-general-chat]                    MathApp
+               │                                  │
+               ▼                                  │
+       WeatherApp / ExchangeApp /                 │
+       GeneralChatApp                             │
+               └─────────────────────────────────►│
+                                            [app-results]
+                                                  │
+                                       ResponseAggregator
+                                                  │
+                                          [bot-responses]
+                                                  │
+                                           UserInterface
 ```
 
 ### Exercise 3 — Review Analysis Pipeline
 
 ```
-stdin → producer ──► raw-reviews-topic ──► processor (3-step LLM)
-                                               │ [Step 1: Is it a review? Zero-Shot]
-                                               │ [Step 2: Extract summary/sentiment/score]
-                                               │ [Step 3: Self-correct inconsistencies]
-                                               ▼
-                                    processed-insights-topic ──► analytics (display)
-```
-
-### Exercise 4 — Customer Support Fan-Out Pipeline
-
-```
-stdin → producer ──► raw-customer-messages ──► sanitizer (Ollama PII scrub)
-                                                     │
-                                           sanitized-messages
-                                           ├──► sentiment_worker.py ──► analysis-sentiment ──┐
-                                           └──► urgency_worker.py ──► analysis-urgency ──────┤
-                                                                                              ▼
-                                                                              insight-aggregator (stream join)
-                                                                              [NEGATIVE + Urgent → STRONG ALERT]
+stdin
+  │
+  ▼
+ReviewProducer ──► [raw-reviews-topic]
+                           │
+                           ▼
+                   ReviewProcessor
+                     │
+                     ├── Step 1: reviewRouterPrompt → is it a review?
+                     │           (if "ignore" → skip)
+                     ├── Step 2: reviewAnalyzerPrompt → sentiment, score, aspects
+                     └── Step 3: selfCorrectionPrompt → fix inconsistencies (if needed)
+                           │
+                           ▼
+                   [processed-insights-topic]
+                           │
+                           ▼
+                   ReviewAnalytics (display + running avg)
 ```
 
 ### Java Track — Wikimedia Pipeline
 
 ```
-Wikimedia SSE Stream ──► WikimediaChangesProducer ──► wikimedia.recentchange
-                                                            ├──► OpenSearchConsumer ──► OpenSearch index
-                                                            └──► WikimediaStreamsApp
-                                                                      ├── BotCountStreamBuilder
-                                                                      ├── EventCountTimeseriesBuilder
-                                                                      └── WebsiteCountStreamBuilder
+Wikimedia SSE Stream ──► WikimediaChangesProducer ──► [wikimedia.recentchange]
+                                                              │
+                                         ┌────────────────────┤
+                                         ▼                    ▼
+                                 OpenSearchConsumer    WikimediaStreamsApp
+                                 (bulk index)          ├── BotCountStreamBuilder
+                                                       ├── EventCountTimeseriesBuilder
+                                                       └── WebsiteCountStreamBuilder
 ```
 
 ---
 
-## 7. Development Rules
-
-These rules apply to the **Java track** (`kafka-basics`, `kafka-producer-wikimedia`, `kafka-consumer-opensearch`, `kafka-streams-wikimedia`):
-
-1. **Java only.** Do not introduce Python, Node.js, or any other language into the Java modules.
-2. **Package structure.** All Java classes must be under `io.conduktor.demos.kafka.*`.
-3. **Logging.** Use SLF4J. All Kafka log messages must include topic, partition, and offset.
-4. **Kafka client.** Use `org.apache.kafka.clients` library.
-5. **Serialization.** Default to `StringSerializer` / `StringDeserializer`. Use explicit serializers for other types.
-6. **Gradle structure.** Do not change the multi-module Gradle structure. Do not modify `build.gradle` unless necessary.
-7. **Topic names.** Do not rename existing Kafka topics.
-8. **New code.** Prefer creating new classes over modifying existing ones.
-
-### Adding a New Service (Java)
-
-1. Create a new class under `io.conduktor.demos.kafka.<module>`.
-2. Use the standard `KafkaProducer<String, String>` or `KafkaConsumer<String, String>` pattern.
-3. Configure with `Properties` and `StringSerializer`/`StringDeserializer`.
-4. Add SLF4J logger: `private static final Logger log = LoggerFactory.getLogger(YourClass.class);`
-5. Log each produced/consumed record including topic, partition, and offset.
-
-### Adding a New Exercise Service (TypeScript)
-
-1. Create a new directory under the relevant exercise (e.g., `exercise4/services/newService/`).
-2. Import Kafka client from the exercise's `kafka/kafkaClient.ts` shared module.
-3. Import topic names from `shared/topics.ts`.
-4. Import or extend types from `shared/types.ts`.
-5. Use the KafkaJS consumer/producer pattern established in the exercise.
-
----
-
-## 8. Running the System
+## 7. Running the System
 
 ### Prerequisites
 
 - Docker and docker-compose
 - [Bun](https://bun.sh/) 1.0+
-- Java 17+ and Gradle (for Java track)
-- Python 3.10+ (for Exercise 4 Python workers)
-- [Ollama](https://ollama.com/) running locally (for Exercise 4 sanitizer)
-- OpenAI API key in `.env`
+- Java 17+ and Gradle (for Java track only)
+- OpenAI API key (for Exercise 2 and Exercise 3)
 
 ### Environment Setup
 
 ```bash
 cp .env.example .env
-# Fill in OPENAI_API_KEY and configure ROUTER_MODE (regex | llm)
+# Set OPENAI_API_KEY=sk-...
+# Set ROUTER_MODE=regex  (Exercise 1) or  ROUTER_MODE=llm  (Exercise 2)
 ```
 
-### Java Track
+### Start Kafka and Create Topics
 
 ```bash
-# Start Kafka (using any docker-compose from an exercise)
-cd exercise2 && docker-compose up -d
+# Start Kafka broker (KRaft mode, port 9092)
+docker-compose -f infra/docker-compose.yml up -d
 
-# Run a Java module
-./gradlew :kafka-producer-wikimedia:run
-./gradlew :kafka-consumer-opensearch:run
-./gradlew :kafka-streams-wikimedia:run
-
-# For OpenSearch module, start OpenSearch first
-cd kafka-consumer-opensearch && docker-compose up -d
+# Create all topics for Exercises 1–3
+bash infra/topics.sh
 ```
 
 ### Exercise 1 — Distributed Chatbot
 
 ```bash
-cd exercise1
+# Install dependencies (once)
 bun install
 
-# Start all services (each in a separate terminal)
-bun run services/memoryService/memoryService.ts
-bun run services/routerService/routerService.ts
-bun run services/mathApp/mathApp.ts
-bun run services/weatherApp/weatherApp.ts
-bun run services/exchangeApp/exchangeApp.ts
-bun run services/generalChatApp/generalChatApp.ts
-bun run services/responseAggregator/responseAggregator.ts
-bun run services/userInterface/userInterface.ts
+# Start all pipeline services in the background (logs written to logs/)
+bash scripts/start-ex1.sh
+
+# Start the User Interface manually in a separate terminal
+bun run services/user-interface/userInterface.ts
 ```
 
-### Exercise 2 — LLM Pipeline
+### Exercise 2 — LLM Prompt Engineering
 
 ```bash
-cd exercise2
-docker-compose up -d
-bash topics.sh
 bun install
 
-# Start services (each in a separate terminal)
-bun run services/guardrailService.ts
-bun run services/llmRouterService.ts
-bun run services/llmExtractionService.ts
-bun run services/jsonParserService.ts
-bun run services/cotMathService.ts
+# Requires OPENAI_API_KEY and ROUTER_MODE=llm in .env
+bash scripts/start-ex2.sh
+
+# Start the User Interface manually in a separate terminal
+bun run services/user-interface/userInterface.ts
 ```
 
 ### Exercise 3 — Review Analysis
 
 ```bash
-cd exercise3
-docker-compose up -d
-bash topics.sh
 bun install
 
-# Terminal 1: analytics consumer
-bun run analytics.ts
+# Requires OPENAI_API_KEY in .env
+# Starts reviewAnalytics and reviewProcessor in the background
+bash scripts/start-ex3.sh
 
-# Terminal 2: LLM processor
-bun run processor.ts
-
-# Terminal 3: producer (sends review lines)
-bun run producer.ts
+# Start the interactive review producer in a separate terminal
+bun run services/review-producer/reviewProducer.ts
 ```
 
-### Exercise 4 — Customer Support Analyzer
+### Stop All Services
 
 ```bash
-cd exercise4
-docker-compose up -d   # or reuse an existing Kafka broker
-bun install
+bash scripts/stop-all.sh
+# Runs: pkill -f bun
+```
 
-# Install Python dependencies
-pip install -r python-workers/requirements.txt
+### Java Track
 
-# Start Ollama with llama3
-ollama run llama3
+```bash
+# Start Kafka
+docker-compose -f infra/docker-compose.yml up -d
 
-# Terminal 1: sanitizer
-bun run sanitizer.ts
-
-# Terminal 2: sentiment worker
-python python-workers/sentiment_worker.py
-
-# Terminal 3: urgency worker
-python python-workers/urgency_worker.py
-
-# Terminal 4: aggregator
-bun run insight-aggregator.ts
-
-# Terminal 5: producer
-bun run producer.ts
+# Run any Java module
+./gradlew :kafka-basics:run
+./gradlew :kafka-producer-wikimedia:run
+./gradlew :kafka-consumer-opensearch:run
+./gradlew :kafka-streams-wikimedia:run
 ```
 
 ---
 
-## 9. AI Prompt Infrastructure
+## 8. Logs and Debugging
 
-Prompt templates are defined inline in TypeScript files within each exercise.
+All `start-ex*.sh` scripts create the `logs/` directory automatically and redirect each service's stdout and stderr to a dedicated file.
 
-| Location | Purpose |
-|---|---|
-| `exercise2/prompts/prompts.ts` | Few-Shot classification, Structured JSON extraction, Chain-of-Thought math, Persona/Guardrail templates |
-| `exercise3/prompts.ts` | Zero-Shot review router, Structured JSON analyzer, Self-correction validator |
-| `exercise4/prompts.ts` | Ollama PII sanitization prompt (scrub names and phone numbers) |
+```bash
+# Watch a specific service log in real time
+tail -f logs/router-service.log
+tail -f logs/llm-router-service.log
+tail -f logs/review-processor.log
 
-### Prompt Engineering Techniques by Exercise
+# Check for errors across all logs
+grep -i error logs/*.log
+```
 
-| Exercise | Technique | Where |
+| Log File | Service | Exercise |
 |---|---|---|
-| Exercise 2 | Few-Shot Prompting | `llmRouterService.ts` → `prompts/prompts.ts` |
-| Exercise 2 | Structured JSON Output | `llmExtractionService.ts` → `prompts/prompts.ts` |
-| Exercise 2 | Chain-of-Thought (CoT) | `cotMathService.ts` → `prompts/prompts.ts` |
-| Exercise 2 | Persona / Guardrails | `guardrailService.ts` → `prompts/prompts.ts` |
-| Exercise 3 | Zero-Shot Classification | `processor.ts` → `prompts.ts` (Step 1) |
-| Exercise 3 | Structured JSON Output | `processor.ts` → `prompts.ts` (Step 2) |
-| Exercise 3 | Self-Correction | `processor.ts` → `prompts.ts` (Step 3) |
-| Exercise 4 | PII Sanitization via Ollama | `sanitizer.ts` → `prompts.ts` |
+| `logs/memory-service.log` | MemoryService | 1, 2 |
+| `logs/router-service.log` | RouterService | 1, 2 |
+| `logs/response-aggregator.log` | ResponseAggregator | 1, 2 |
+| `logs/math-app.log` | MathApp | 1, 2 |
+| `logs/weather-app.log` | WeatherApp | 1, 2 |
+| `logs/exchange-app.log` | ExchangeApp | 1, 2 |
+| `logs/general-chat-app.log` | GeneralChatApp | 1, 2 |
+| `logs/guardrail-service.log` | GuardrailService | 2 |
+| `logs/llm-router-service.log` | LLMRouterService | 2 |
+| `logs/cot-math-service.log` | CotMathService | 2 |
+| `logs/review-analytics.log` | ReviewAnalytics | 3 |
+| `logs/review-processor.log` | ReviewProcessor | 3 |
 
-### LLM Models Used
-
-| Exercise | Model | Technique |
-|---|---|---|
-| Exercise 2–3 | `gpt-4o-mini` (OpenAI) | Classification, extraction, CoT, self-correction |
-| Exercise 4 (sanitizer) | `llama3` via Ollama (local) | PII scrubbing |
-| Exercise 4 (sentiment) | `distilbert-base-uncased-finetuned-sst-2-english` (HuggingFace) | Sentiment classification |
-| Exercise 4 (urgency) | `facebook/bart-large-mnli` (HuggingFace) | Zero-shot urgency detection |
+**Conversation history** is persisted to `services/memory-service/history.json`. Send `reset` as a message via the UserInterface to clear it (triggers `user-control-events`).
 
 ---
 
-## 10. Future Extensions
+## 9. Development Rules
 
-The final project concept is an **Event-Driven AI Agent using Event Sourcing and Kafka Streams**.
+### Java Track
 
-The architecture for this would extend the existing system as follows:
+1. **Java only.** Do not introduce other languages into Java modules.
+2. **Package structure.** All classes under `io.conduktor.demos.kafka.*`.
+3. **Logging.** Use SLF4J. All Kafka log messages must include topic, partition, and offset.
+4. **Kafka client.** Use `org.apache.kafka.clients` library.
+5. **Serialization.** Default to `StringSerializer` / `StringDeserializer`.
+6. **Gradle.** Do not change the multi-module Gradle structure or modify `build.gradle` unless necessary.
+7. **Topics.** Do not rename existing Kafka topics.
+8. **New code.** Prefer creating new classes over modifying existing ones.
 
-### Planned Agent Architecture
+### Adding a New Java Service
 
-```
-User Event
-    │
-    ▼
-[Agent Input Topic]
-    │
-    ▼
-[Event Store Topic] ◄── append-only log (Event Sourcing)
-    │
-    ▼
-[Kafka Streams Processor]
-    ├── State reconstruction from event log
-    ├── Intent classification (builds on Exercise 2)
-    ├── Tool selection and invocation
-    └── Memory aggregation (builds on Exercise 1)
-    │
-    ▼
-[Agent Action Topics]
-    ├──► Tool Worker (math, weather, exchange, search)
-    ├──► Memory Service (conversation context)
-    └──► LLM Worker (generative response)
-    │
-    ▼
-[Agent Output Topic] ──► User Interface
-```
+1. Create a new class under `io.conduktor.demos.kafka.<module>`.
+2. Use `KafkaProducer<String, String>` or `KafkaConsumer<String, String>`.
+3. Configure with `Properties` and `StringSerializer`/`StringDeserializer`.
+4. Add `private static final Logger log = LoggerFactory.getLogger(YourClass.class);`
+5. Log each record with topic, partition, and offset.
 
-### How Current Exercises Map to Final Project
+### Adding a New TypeScript Service
 
-| Final Project Component | Built In |
-|---|---|
-| Event Sourcing topic (append-only log) | Kafka topics in all exercises |
-| Intent router | Exercise 1 (regex) + Exercise 2 (LLM) |
-| Prompt engineering pipeline | Exercise 2 (Few-Shot, CoT, Guardrails) |
-| Multi-step LLM processing | Exercise 3 (self-correcting pipeline) |
-| Parallel inference workers | Exercise 4 (fan-out + stream join) |
-| PII sanitization | Exercise 4 (Ollama sanitizer) |
-| State reconstruction via Kafka Streams | `kafka-streams-wikimedia` (Java) |
-| Memory service | Exercise 1 (MemoryService + history.json) |
-
-### Extension Points
-
-- Replace regex router in Exercise 1 with LLM router from Exercise 2.
-- Add an event-sourcing topic that replays to reconstruct agent state.
-- Implement a Kafka Streams topology (Java) to aggregate agent memory across sessions.
-- Add a tool registry topic where workers advertise their capabilities dynamically.
-- Introduce schema registry (Avro/Protobuf) to replace raw JSON string serialization.
-- Add dead-letter topics for failed LLM calls and retry logic.
+1. Create a new file under `services/<service-name>/<serviceName>.ts`.
+2. Import the Kafka factory from `shared/kafka/client.ts`.
+3. Import topic names from `shared/topics.ts`.
+4. Import or extend types from `shared/types/`.
+5. Register graceful shutdown with `registerShutdown([producer, consumer])`.
+6. Add a log redirect entry to the relevant `scripts/start-ex*.sh`.
