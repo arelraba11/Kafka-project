@@ -1,13 +1,14 @@
-// Message schemas for the customer support analysis pipeline
+// Message schemas for the customer support analysis pipeline (Exercise 4)
 
 // -------------------------------------------------------------------
 // raw-customer-messages
 // -------------------------------------------------------------------
 export interface RawMessage {
-  message_id: string;       // UUID v4
-  timestamp: string;        // ISO-8601
+  message_id: string;    // UUID v4
+  timestamp: string;     // ISO-8601
   source: "cli";
-  text: string;             // original, unfiltered customer input
+  text: string;          // original, unfiltered customer input
+  t_produced: number;    // epoch ms — set by producer for latency tracking
 }
 
 // -------------------------------------------------------------------

@@ -7,7 +7,7 @@ This repository is a progressive Kafka learning course that builds a multi-exerc
 The course contains two tracks:
 
 - **Java Track** (`kafka-basics`, `kafka-producer-wikimedia`, `kafka-consumer-opensearch`, `kafka-streams-wikimedia`) — foundational Kafka producer/consumer/streams demos using `org.apache.kafka.clients`.
-- **Exercise Track** (`exercise1`, `exercise2`, `exercise3`) — a progressive TypeScript system (Bun + KafkaJS) building toward an event-driven AI agent. All services live in the top-level `services/` directory and share modules from `shared/`.
+- **Exercise Track** (`exercise1`, `exercise2`, `exercise3`, `exercise4`) — a progressive TypeScript system (Bun + KafkaJS) building toward an event-driven AI agent. All services live in the top-level `services/` directory and share modules from `shared/`.
 
 ---
 
@@ -28,14 +28,18 @@ kafka-beginners-course-main/
 ├── kafka-consumer-opensearch/      # Java: Kafka → OpenSearch bulk consumer
 ├── kafka-streams-wikimedia/        # Java: Kafka Streams aggregations
 │
+├── exercise4/
+│   └── README.md                   # Exercise 4 architecture notes
+│
 ├── infra/
 │   ├── docker-compose.yml          # Single-broker Kafka 3.8.0 (KRaft mode, port 9092)
-│   └── topics.sh                   # Creates all Kafka topics for Exercises 1–3
+│   └── topics.sh                   # Creates all Kafka topics for Exercises 1–4
 │
 ├── scripts/
-│   ├── start-ex1.sh                # Start Exercise 1 services (background, logs to logs/)
-│   ├── start-ex2.sh                # Start Exercise 2 services (background, logs to logs/)
-│   ├── start-ex3.sh                # Start Exercise 3 services (background, logs to logs/)
+│   ├── start-ex1.sh                # Start Exercise 1 services (background, logs to scripts/logs/ex1-services/)
+│   ├── start-ex2.sh                # Start Exercise 2 services (background, logs to scripts/logs/ex2-services/)
+│   ├── start-ex3.sh                # Start Exercise 3 services (background, logs to scripts/logs/ex3-services/)
+│   ├── start-ex4.sh                # Start Exercise 4 services (background, logs to scripts/logs/ex4-services/)
 │   └── stop-all.sh                 # Kill all Bun processes (pkill -f bun)
 │
 ├── shared/                         # Shared modules used by all TypeScript services
@@ -44,12 +48,16 @@ kafka-beginners-course-main/
 │   ├── llm/
 │   │   └── openai.ts               # OpenAI wrapper: callLLM(prompt) → string (gpt-4o-mini)
 │   ├── prompts/
-│   │   └── prompts.ts              # All LLM prompt templates (Exercises 2 and 3)
+│   │   ├── prompts.ts              # LLM prompt templates (Exercises 2 and 3)
+│   │   └── customerSupportPrompts.ts # LLM prompt templates (Exercise 4)
 │   ├── types/
 │   │   ├── events.ts               # Exercise 1 + 2 event types
 │   │   ├── conversation.ts         # ConversationHistory type
-│   │   └── reviews.ts              # Exercise 3 review types
-│   └── topics.ts                   # Centralized Kafka topic name constants
+│   │   ├── reviews.ts              # Exercise 3 review types
+│   │   └── customerSupport.ts      # Exercise 4 customer support types
+│   ├── customerSupport/
+│   │   └── benchmark.ts            # Latency computation helpers (computeBenchmark, mergeInsight)
+│   └── topics.ts                   # Centralized Kafka topic name constants (all exercises)
 │
 ├── services/                       # All TypeScript microservices
 │   ├── user-interface/
@@ -75,22 +83,28 @@ kafka-beginners-course-main/
 │   │   └── reviewProducer.ts       # Reads stdin → raw-reviews-topic
 │   ├── review-processor/
 │   │   └── reviewProcessor.ts      # 3-step LLM pipeline (gpt-4o-mini)
-│   └── review-analytics/
-│       └── reviewAnalytics.ts      # Real-time insight display + running avg score
+│   ├── review-analytics/
+│   │   └── reviewAnalytics.ts      # Real-time insight display + running avg score
+│   ├── customer-support-producer/
+│   │   └── customerSupportProducer.ts  # Reads stdin → raw-customer-messages — start MANUALLY
+│   ├── sanitizer-service/
+│   │   └── sanitizerService.ts     # PII scrubber via Ollama (llama3)
+│   ├── sentiment-analyzer/
+│   │   └── sentimentAnalyzer.ts    # Sentiment classifier POSITIVE/NEGATIVE (gpt-4o-mini)
+│   ├── urgency-classifier/
+│   │   └── urgencyClassifier.ts    # Urgency classifier Urgent/Complaint/General (gpt-4o-mini)
+│   ├── insight-aggregator/
+│   │   └── insightAggregator.ts    # Stream join by message_id + alert rule
+│   └── python-workers/             # Alternative Python implementations (HuggingFace)
+│       ├── sentiment_worker.py     # distilbert sentiment (manual run, not in start-ex4.sh)
+│       ├── urgency_worker.py       # bart-large-mnli urgency (manual run, not in start-ex4.sh)
+│       └── requirements.txt        # kafka-python, transformers, torch
 │
-└── logs/                           # Created automatically by start-ex*.sh scripts
-    ├── memory-service.log
-    ├── router-service.log
-    ├── response-aggregator.log
-    ├── math-app.log
-    ├── weather-app.log
-    ├── exchange-app.log
-    ├── general-chat-app.log
-    ├── guardrail-service.log       # Exercise 2 only
-    ├── llm-router-service.log      # Exercise 2 only
-    ├── cot-math-service.log        # Exercise 2 only
-    ├── review-analytics.log        # Exercise 3 only
-    └── review-processor.log        # Exercise 3 only
+└── scripts/logs/                   # Created automatically by start-ex*.sh scripts
+    ├── ex1-services/
+    ├── ex2-services/
+    ├── ex3-services/
+    └── ex4-services/
 ```
 
 ---
@@ -132,6 +146,10 @@ All topic names are exported as named constants to avoid magic strings:
 | `GUARDRAIL_VIOLATION` | `guardrail-violation-events` |
 | `RAW_REVIEWS` | `raw-reviews-topic` |
 | `PROCESSED_INSIGHTS` | `processed-insights-topic` |
+| `RAW_CUSTOMER_MESSAGES` | `raw-customer-messages` |
+| `SANITIZED_MESSAGES` | `sanitized-messages` |
+| `ANALYSIS_SENTIMENT` | `analysis-sentiment` |
+| `ANALYSIS_URGENCY` | `analysis-urgency` |
 
 ### `shared/llm/openai.ts`
 
@@ -144,17 +162,35 @@ export async function callLLM(prompt: string): Promise<string>
 
 ### `shared/prompts/prompts.ts`
 
-All LLM prompt templates in one place:
+All LLM prompt templates for Exercises 2 and 3:
 
 | Function | Used By | Technique |
 |---|---|---|
 | `llmRouterPrompt(userInput)` | `llmRouterService.ts` | Few-Shot classification → `{ intent, parameters, confidence }` |
 | `llmExtractionPrompt(intent, input)` | `llmRouterService.ts` | Structured JSON extraction |
 | `cotMathPrompt(wordProblem)` | `cotMathService.ts` | Chain-of-Thought → `{ reasoning, expression }` |
-| `generalChatPersonaPrompt` | `generalChatApp.ts` | System persona ("Pipeline", data-engineering metaphors) |
 | `reviewRouterPrompt(input)` | `reviewProcessor.ts` | Zero-Shot classification → `{ intent, reason }` |
 | `reviewAnalyzerPrompt(text)` | `reviewProcessor.ts` | Structured JSON → `{ summary, sentiment, score, aspects[] }` |
 | `selfCorrectionPrompt(text, prev, score)` | `reviewProcessor.ts` | Self-correction for score/sentiment inconsistencies |
+
+### `shared/prompts/customerSupportPrompts.ts`
+
+Prompt templates for Exercise 4:
+
+| Function | Used By | Technique |
+|---|---|---|
+| `buildSanitizePrompt(text)` | `sanitizerService.ts` | Instructs Ollama to replace names→[NAME], phones→[NUMBER] |
+| `sentimentPrompt(text)` | `sentimentAnalyzer.ts` | Binary classification → `{ label: POSITIVE\|NEGATIVE, score }` |
+| `urgencyPrompt(text)` | `urgencyClassifier.ts` | 3-class classification → `{ label, scores: {Urgent, Complaint, General Inquiry} }` |
+
+### `shared/customerSupport/benchmark.ts`
+
+Latency computation helpers used with `PartialInsight` / `FullInsight` from `shared/types/customerSupport.ts`:
+
+| Export | Purpose |
+|---|---|
+| `computeBenchmark(partial)` | Returns `{ sanitize_latency_ms, sentiment_latency_ms, urgency_latency_ms, total_latency_ms }` |
+| `mergeInsight(partial)` | Merges a completed `PartialInsight` into a `FullInsight` |
 
 ---
 
@@ -189,6 +225,15 @@ All LLM prompt templates in one place:
 |---|---|---|---|
 | `raw-reviews-topic` | ReviewProducer | ReviewProcessor | Raw review text (UUID keyed) |
 | `processed-insights-topic` | ReviewProcessor | ReviewAnalytics | Structured LLM-analyzed insight |
+
+### Exercise 4 — Customer Support Analysis
+
+| Topic | Producer | Consumer | Purpose |
+|---|---|---|---|
+| `raw-customer-messages` | CustomerSupportProducer | SanitizerService | Raw CLI input (UUID keyed) |
+| `sanitized-messages` | SanitizerService | SentimentAnalyzer, UrgencyClassifier | PII-scrubbed text, fan-out to two groups |
+| `analysis-sentiment` | SentimentAnalyzer | InsightAggregator | Sentiment label + confidence score |
+| `analysis-urgency` | UrgencyClassifier | InsightAggregator | Urgency label + per-class scores |
 
 ---
 
@@ -247,6 +292,26 @@ Requires Exercise 1 running with `ROUTER_MODE=llm`. Three additional services in
 3. **Step 3 — Self-correction:** If `score < 4` and `sentiment == "Positive"`, re-run with correction prompt
 
 **ReviewAnalytics** displays each insight in the terminal and maintains a running average score.
+
+### Exercise 4 — Customer Support Analysis Pipeline (standalone)
+
+Demonstrates stream fan-out, parallel AI inference, and event correlation (stream join).
+
+| Service | File | Consumer Group | Consumes | Produces | LLM/Model |
+|---|---|---|---|---|---|
+| CustomerSupportProducer | `customer-support-producer/customerSupportProducer.ts` | — (producer only) | stdin | `raw-customer-messages` | None |
+| SanitizerService | `sanitizer-service/sanitizerService.ts` | `sanitizer-group` | `raw-customer-messages` | `sanitized-messages` | Ollama (llama3) |
+| SentimentAnalyzer | `sentiment-analyzer/sentimentAnalyzer.ts` | `sentiment-group` | `sanitized-messages` | `analysis-sentiment` | gpt-4o-mini |
+| UrgencyClassifier | `urgency-classifier/urgencyClassifier.ts` | `urgency-group` | `sanitized-messages` | `analysis-urgency` | gpt-4o-mini |
+| InsightAggregator | `insight-aggregator/insightAggregator.ts` | `insight-aggregator-group` | `analysis-sentiment`, `analysis-urgency` | — (stdout) | None |
+
+**Fan-out pattern:** `SentimentAnalyzer` and `UrgencyClassifier` consume the same `sanitized-messages` topic with **different consumer groups** so Kafka delivers each message to both independently.
+
+**Alert rule in InsightAggregator:**
+- `sentiment.label === "NEGATIVE"` AND `urgency.label === "Urgent"` → `🚨 STRONG ALERT`
+- Otherwise → `[insight] normal log`
+
+**Python alternative workers** (`services/python-workers/`) implement the same sentiment and urgency classification using HuggingFace Transformers (distilbert, bart-large-mnli). These are standalone scripts run manually — they are **not** started by `start-ex4.sh`. They subscribe to `sanitized-messages` using the same consumer group IDs (`sentiment-group`, `urgency-group`) so they can replace the TypeScript workers if a local GPU is available.
 
 ---
 
@@ -338,6 +403,38 @@ ReviewProducer ──► [raw-reviews-topic]
                    ReviewAnalytics (display + running avg)
 ```
 
+### Exercise 4 — Customer Support Analysis Pipeline
+
+```
+stdin
+  │
+  ▼
+CustomerSupportProducer ──► [raw-customer-messages]
+                                       │
+                                       ▼
+                               SanitizerService
+                               (Ollama llama3, PII scrub)
+                                       │
+                            [sanitized-messages]  ← fan-out to two consumer groups
+                                   │         │
+                    ┌──────────────┘         └──────────────┐
+                    ▼ (sentiment-group)        ▼ (urgency-group)
+            SentimentAnalyzer           UrgencyClassifier
+            (gpt-4o-mini)               (gpt-4o-mini)
+                    │                          │
+          [analysis-sentiment]       [analysis-urgency]
+                    │                          │
+                    └────────────┬─────────────┘
+                                 ▼
+                         InsightAggregator
+                         (stream join by message_id)
+                                 │
+                    ┌────────────┴────────────┐
+                    ▼                         ▼
+          🚨 STRONG ALERT             [insight] normal log
+          (NEGATIVE + Urgent)
+```
+
 ### Java Track — Wikimedia Pipeline
 
 ```
@@ -360,7 +457,8 @@ Wikimedia SSE Stream ──► WikimediaChangesProducer ──► [wikimedia.rec
 - Docker and docker-compose
 - [Bun](https://bun.sh/) 1.0+
 - Java 17+ and Gradle (for Java track only)
-- OpenAI API key (for Exercise 2 and Exercise 3)
+- OpenAI API key (for Exercises 2, 3, and 4)
+- [Ollama](https://ollama.com/) with `llama3` pulled (for Exercise 4 sanitizer only)
 
 ### Environment Setup
 
@@ -376,17 +474,16 @@ cp .env.example .env
 # Start Kafka broker (KRaft mode, port 9092)
 docker-compose -f infra/docker-compose.yml up -d
 
-# Create all topics for Exercises 1–3
+# Create all topics for Exercises 1–4
 bash infra/topics.sh
 ```
 
 ### Exercise 1 — Distributed Chatbot
 
 ```bash
-# Install dependencies (once)
 bun install
 
-# Start all pipeline services in the background (logs written to logs/)
+# Start all pipeline services in the background (logs to scripts/logs/ex1-services/)
 bash scripts/start-ex1.sh
 
 # Start the User Interface manually in a separate terminal
@@ -418,6 +515,28 @@ bash scripts/start-ex3.sh
 bun run services/review-producer/reviewProducer.ts
 ```
 
+### Exercise 4 — Customer Support Analysis
+
+```bash
+bun install
+
+# Requires:
+#   OPENAI_API_KEY in .env  (sentiment-analyzer, urgency-classifier)
+#   Ollama running locally: ollama serve && ollama pull llama3  (sanitizer-service)
+
+# Starts sanitizer, sentiment-analyzer, urgency-classifier, insight-aggregator
+bash scripts/start-ex4.sh
+
+# Start the interactive producer in a separate terminal
+bun run services/customer-support-producer/customerSupportProducer.ts
+
+# Optional: run Python workers instead of TypeScript sentiment/urgency services
+# cd services/python-workers && python -m venv venv && source venv/bin/activate
+# pip install -r requirements.txt
+# python sentiment_worker.py   # uses same consumer group: sentiment-group
+# python urgency_worker.py     # uses same consumer group: urgency-group
+```
+
 ### Stop All Services
 
 ```bash
@@ -428,10 +547,8 @@ bash scripts/stop-all.sh
 ### Java Track
 
 ```bash
-# Start Kafka
 docker-compose -f infra/docker-compose.yml up -d
 
-# Run any Java module
 ./gradlew :kafka-basics:run
 ./gradlew :kafka-producer-wikimedia:run
 ./gradlew :kafka-consumer-opensearch:run
@@ -442,32 +559,37 @@ docker-compose -f infra/docker-compose.yml up -d
 
 ## 8. Logs and Debugging
 
-All `start-ex*.sh` scripts create the `logs/` directory automatically and redirect each service's stdout and stderr to a dedicated file.
+All `start-ex*.sh` scripts create their log directory automatically and redirect each service's stdout and stderr to a dedicated file.
 
 ```bash
 # Watch a specific service log in real time
-tail -f logs/router-service.log
-tail -f logs/llm-router-service.log
-tail -f logs/review-processor.log
+tail -f scripts/logs/ex1-services/router-service.log
+tail -f scripts/logs/ex2-services/llm-router-service.log
+tail -f scripts/logs/ex3-services/review-processor.log
+tail -f scripts/logs/ex4-services/sentiment-analyzer.log
 
 # Check for errors across all logs
-grep -i error logs/*.log
+grep -i error scripts/logs/**/*.log
 ```
 
 | Log File | Service | Exercise |
 |---|---|---|
-| `logs/memory-service.log` | MemoryService | 1, 2 |
-| `logs/router-service.log` | RouterService | 1, 2 |
-| `logs/response-aggregator.log` | ResponseAggregator | 1, 2 |
-| `logs/math-app.log` | MathApp | 1, 2 |
-| `logs/weather-app.log` | WeatherApp | 1, 2 |
-| `logs/exchange-app.log` | ExchangeApp | 1, 2 |
-| `logs/general-chat-app.log` | GeneralChatApp | 1, 2 |
-| `logs/guardrail-service.log` | GuardrailService | 2 |
-| `logs/llm-router-service.log` | LLMRouterService | 2 |
-| `logs/cot-math-service.log` | CotMathService | 2 |
-| `logs/review-analytics.log` | ReviewAnalytics | 3 |
-| `logs/review-processor.log` | ReviewProcessor | 3 |
+| `scripts/logs/ex1-services/memory-service.log` | MemoryService | 1, 2 |
+| `scripts/logs/ex1-services/router-service.log` | RouterService | 1, 2 |
+| `scripts/logs/ex1-services/response-aggregator.log` | ResponseAggregator | 1, 2 |
+| `scripts/logs/ex1-services/math-app.log` | MathApp | 1, 2 |
+| `scripts/logs/ex1-services/weather-app.log` | WeatherApp | 1, 2 |
+| `scripts/logs/ex1-services/exchange-app.log` | ExchangeApp | 1, 2 |
+| `scripts/logs/ex1-services/general-chat-app.log` | GeneralChatApp | 1, 2 |
+| `scripts/logs/ex2-services/guardrail-service.log` | GuardrailService | 2 |
+| `scripts/logs/ex2-services/llm-router-service.log` | LLMRouterService | 2 |
+| `scripts/logs/ex2-services/cot-math-service.log` | CotMathService | 2 |
+| `scripts/logs/ex3-services/review-processor.log` | ReviewProcessor | 3 |
+| `scripts/logs/ex3-services/review-analytics.log` | ReviewAnalytics | 3 |
+| `scripts/logs/ex4-services/sanitizer-service.log` | SanitizerService | 4 |
+| `scripts/logs/ex4-services/sentiment-analyzer.log` | SentimentAnalyzer | 4 |
+| `scripts/logs/ex4-services/urgency-classifier.log` | UrgencyClassifier | 4 |
+| `scripts/logs/ex4-services/insight-aggregator.log` | InsightAggregator | 4 |
 
 **Conversation history** is persisted to `services/memory-service/history.json`. Send `reset` as a message via the UserInterface to clear it (triggers `user-control-events`).
 

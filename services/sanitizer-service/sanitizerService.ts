@@ -1,40 +1,28 @@
 /**
- * sanitizer.ts
+ * sanitizerService.ts
  *
  * Consumes raw customer messages, calls Ollama to scrub PII,
  * and publishes sanitized messages downstream.
  *
  * Usage:
- *   bun run sanitizer.ts
+ *   bun run services/sanitizer-service/sanitizerService.ts
  *
  * Topics:
  *   IN  ← raw-customer-messages  (group: sanitizer-group)
  *   OUT → sanitized-messages
  *
  * Dependencies:
- *   Ollama must be running locally (http://localhost:11434)
- *   Model: llama3 or mistral
+ *   Ollama must be running locally (default: http://localhost:11434)
+ *   Model: llama3 (configurable via OLLAMA_MODEL env var)
  */
 
-import { kafka } from "./kafka/kafkaClient.ts";
-import { TOPICS, CONSUMER_GROUPS } from "./shared/topics.ts";
-import type { RawMessage } from "./shared/types.ts";
+import { createProducer, createConsumer, sendMessage, registerShutdown } from "../../shared/kafka/client";
+import { TOPICS } from "../../shared/topics";
+import { buildSanitizePrompt } from "../../shared/prompts/customerSupportPrompts";
+import type { RawMessage, SanitizedMessage } from "../../shared/types/customerSupport";
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3";
-
-// Instructs the model to return only the scrubbed text, nothing else.
-function buildSanitizePrompt(text: string): string {
-  return [
-    "You are a PII scrubbing assistant.",
-    "Replace every person's name with [NAME].",
-    "Replace every phone number (any format) with [NUMBER].",
-    "Return only the sanitized text. Do not add explanations, notes, or extra lines.",
-    "",
-    `Input: ${text}`,
-    "Output:",
-  ].join("\n");
-}
 
 async function callOllama(text: string): Promise<string> {
   const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
@@ -56,11 +44,10 @@ async function callOllama(text: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const consumer = kafka.consumer({ groupId: CONSUMER_GROUPS.SANITIZER });
-  const producer = kafka.producer();
+  const producer = await createProducer();
+  const consumer = await createConsumer("sanitizer-group");
 
-  await consumer.connect();
-  await producer.connect();
+  registerShutdown([producer, consumer]);
 
   await consumer.subscribe({
     topic: TOPICS.RAW_CUSTOMER_MESSAGES,
@@ -71,30 +58,26 @@ async function main(): Promise<void> {
 
   await consumer.run({
     autoCommit: false,
-    eachMessage: async ({ topic, partition, message, heartbeat }) => {
+    eachMessage: async ({ topic, partition, message }) => {
       const raw = message.value?.toString();
       if (!raw) return;
 
       const parsed = JSON.parse(raw) as RawMessage;
-      const { message_id, text, timestamp } = parsed;
+      const { message_id, text, timestamp, t_produced } = parsed;
 
       console.log(`[sanitizer] received ${message_id}`);
 
-      const sanitizedText = await callOllama(text);
+      const sanitized_text = await callOllama(text);
 
-      await producer.send({
-        topic: TOPICS.SANITIZED_MESSAGES,
-        messages: [
-          {
-            key: message_id,
-            value: JSON.stringify({
-              id: message_id,
-              text: sanitizedText,
-              timestamp,
-            }),
-          },
-        ],
-      });
+      const payload: SanitizedMessage = {
+        message_id,
+        timestamp,
+        sanitized_text,
+        t_produced,
+        t_sanitizer_out: Date.now(),
+      };
+
+      await sendMessage(producer, TOPICS.SANITIZED_MESSAGES, message_id, payload);
 
       console.log(`[sanitizer] sanitized ${message_id}`);
 
