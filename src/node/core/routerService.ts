@@ -4,8 +4,8 @@ import {
   sendMessage,
   subscribeAndRun,
   registerShutdown,
-} from "../../shared/kafka/client";
-import { TOPICS } from "../../shared/topics";
+} from "../../../shared/kafka/client";
+import { TOPICS } from "../../../shared/topics";
 import type {
   UserInputEvent,
   IntentMathEvent,
@@ -15,10 +15,10 @@ import type {
   ConversationHistoryUpdateEvent,
   RouterDecisionEvent,
   AppResultEvent,
-} from "../../shared/types/events";
-import type { ConversationHistory } from "../../shared/types/conversation";
-import type { UserQueryReceived } from "../../shared/schemas/UserQueryReceived";
-import type { PlanGenerated, PlanStep } from "../../shared/schemas/PlanGenerated";
+} from "../../../shared/types/events";
+import type { ConversationHistory } from "../../../shared/types/conversation";
+import type { UserQueryReceived } from "../../../shared/schemas/UserQueryReceived";
+import type { PlanGenerated } from "../../../shared/schemas/PlanGenerated";
 
 // ─── Mode ─────────────────────────────────────────────────────────────────────
 
@@ -44,9 +44,10 @@ function getGuardrailViolation(input: string): string | null {
 
 // ─── Intent classification (regex — used in ROUTER_MODE=regex) ────────────────
 
-// Matches symbolic expressions AND word-form operators (multiply, times, product)
-const MATH_OPERATOR_REGEX = /[\d]+\s*[+\-*/]\s*[\d]+/;
-const MATH_WORD_REGEX = /\b(multiply|multiplied|times|product)\b/i;
+// Matches symbolic expressions: 2+2, 25 * 4, 10/5, 7-3, etc.
+const MATH_OPERATOR_REGEX = /\d+\s*[+\-*/]\s*\d+/;
+// Matches natural-language math requests that contain at least one digit
+const MATH_WORD_REGEX = /\b(multiply|multiplied|times|product|calculate|divided|plus|minus)\b/i;
 const WEATHER_REGEX = /\b(weather|temperature|forecast|hot|cold|rain|sunny)\b/i;
 const CURRENCY_REGEX = /\b(USD|EUR|ILS|GBP|JPY|CHF|CAD|AUD)\b/i;
 const CITY_REGEX = /\bin\s+([A-Za-z\s]+?)(?:\?|$)/i;
@@ -73,11 +74,7 @@ function extractExpression(input: string): string {
 }
 
 function extractCity(input: string): string {
-  // Stop before conjunctions, currency keywords, digits, or end of string.
-  // Needed for multi-intent queries like "weather in london and convert 100 usd to ils".
-  const match = input.match(
-    /\bin\s+([A-Za-z](?:\s+[A-Za-z]+)*?)(?=\s+(?:and\b|convert|exchange|USD|EUR|ILS|GBP|JPY|CHF|CAD|AUD)|\?|$)/i
-  );
+  const match = input.match(CITY_REGEX);
   return match ? match[1].trim() : "Tel Aviv";
 }
 
@@ -86,17 +83,6 @@ function extractCurrency(input: string): { currencyCode: string; targetCurrency:
   return {
     currencyCode: match ? match[0].toUpperCase() : "USD",
     targetCurrency: "ILS",
-  };
-}
-
-function extractExchangeArgs(input: string): { amount: number; currencyCode: string; targetCurrency: string } {
-  const amountMatch = input.match(/\b(\d+(?:\.\d+)?)\b/);
-  const amount = amountMatch ? parseFloat(amountMatch[1]) : 1;
-  const currencies = input.match(/\b(USD|EUR|ILS|GBP|JPY|CHF|CAD|AUD)\b/gi) ?? [];
-  return {
-    amount,
-    currencyCode: (currencies[0] ?? "USD").toUpperCase(),
-    targetCurrency: (currencies[1] ?? "ILS").toUpperCase(),
   };
 }
 
@@ -193,22 +179,14 @@ async function route(
 const PLAN_WEATHER_REGEX  = /\b(weather|temperature|forecast|hot|cold|rain|sunny)\b/i;
 const PLAN_EXCHANGE_REGEX = /\b(exchange|convert|USD|EUR|ILS|GBP|JPY|CHF|CAD|AUD)\b/i;
 
-function generatePlan(userInput: string): PlanStep[] {
-  const steps: PlanStep[] = [];
+function generatePlan(userInput: string): string[] {
+  const steps: string[] = [];
 
-  if (PLAN_WEATHER_REGEX.test(userInput)) {
-    steps.push({ tool: "weather", args: { city: extractCity(userInput) } });
-  }
-  if (PLAN_EXCHANGE_REGEX.test(userInput)) {
-    steps.push({ tool: "exchange", args: extractExchangeArgs(userInput) });
-  }
-  if (isMathInput(userInput)) {
-    steps.push({ tool: "math", args: { expression: extractExpression(userInput) } });
-  }
+  if (PLAN_WEATHER_REGEX.test(userInput))  steps.push("weather");
+  if (PLAN_EXCHANGE_REGEX.test(userInput)) steps.push("exchange");
+  if (isMathInput(userInput))              steps.push("math");
 
-  if (steps.length === 0) {
-    steps.push({ tool: "chat", args: { userInput } });
-  }
+  if (steps.length === 0) steps.push("chat");
 
   return steps;
 }
@@ -224,13 +202,13 @@ async function routePlan(
     conversationId,
     timestamp: Date.now(),
     eventType: "PlanGenerated",
-    payload: { steps },
+    payload: { steps, userInput: payload.userInput },
   };
 
   await sendMessage(producer, TOPICS.CONVERSATION_EVENTS, conversationId, planEvent);
 
   const routerLatency = Date.now() - event.timestamp;
-  console.log(`[router] conversationId=${conversationId} plan=[${steps.map(s => s.tool).join(", ")}] input="${payload.userInput}"`);
+  console.log(`[router] conversationId=${conversationId} plan=[${steps.join(", ")}] input="${payload.userInput}"`);
   console.log(`[Benchmark] conversationId=${conversationId} routerLatency=${routerLatency}ms`);
 }
 
